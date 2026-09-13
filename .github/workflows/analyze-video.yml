@@ -1,0 +1,48 @@
+name: Analyze QServe sales video
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'analyze_video.py'
+      - 'requirements.txt'
+      - '.github/workflows/analyze-video.yml'
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: gemini-3.5-flash-lite
+      TALK_VIDEO: talk.mp4
+      PRODUCT_VIDEO: product.mp4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download source videos from Drive
+        run: |
+          gdown 'https://drive.google.com/uc?id=1uGzt-Wj18sy4H2CISUCVWpR7mC1OBMkn' -O talk.mp4
+          gdown 'https://drive.google.com/uc?id=1P_hd1WID6X66cem9vmh84DgAYBYSsf37' -O product.mp4
+          ls -lh talk.mp4 product.mp4
+
+      - name: Analyze with Gemini
+        run: python analyze_video.py
+
+      - name: Upload analysis artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qserve-video-analysis
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
