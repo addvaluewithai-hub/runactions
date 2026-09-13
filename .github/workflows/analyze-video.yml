@@ -8,9 +8,12 @@ on:
       - 'analyze_video.py'
       - 'requirements.txt'
       - '.github/workflows/analyze-video.yml'
+  issues:
+    types: [opened]
 
 jobs:
   analyze:
+    if: github.event_name != 'issues' || contains(github.event.issue.title, '[run-video-analysis]')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
