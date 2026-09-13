@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'analyze_video.py'
+      - 'align_audio.py'
       - 'requirements.txt'
       - '.github/workflows/analyze-video.yml'
   issues:
@@ -15,7 +16,7 @@ jobs:
   analyze:
     if: github.event_name != 'issues' || contains(github.event.issue.title, '[run-video-analysis]')
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GEMINI_MODEL: gemini-3.5-flash-lite
@@ -30,6 +31,11 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
+
       - name: Install dependencies
         run: pip install -r requirements.txt
 
@@ -39,8 +45,11 @@ jobs:
           gdown 'https://drive.google.com/uc?id=1P_hd1WID6X66cem9vmh84DgAYBYSsf37' -O product.mp4
           ls -lh talk.mp4 product.mp4
 
-      - name: Analyze with Gemini
+      - name: Analyze semantics with Gemini
         run: python analyze_video.py
+
+      - name: Align speech to audio and rebuild edit plan
+        run: python align_audio.py
 
       - name: Upload analysis artifact
         uses: actions/upload-artifact@v4
