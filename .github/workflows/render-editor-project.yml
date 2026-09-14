@@ -54,7 +54,7 @@ jobs:
           for key,name in names.items():
               drive=p['media'][key].get('original',{}).get('driveId')
               if not drive: raise SystemExit(f'Missing Drive id for {key}')
-              subprocess.check_call(['gdown','--id',drive,'-O',f'work/{name}'])
+              subprocess.check_call(['gdown', drive, '-O', f'work/{name}'])
           PY
 
       - name: Render timeline
