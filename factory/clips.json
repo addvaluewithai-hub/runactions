@@ -10,7 +10,7 @@
     "pip_y": 80
   },
   "clips": {
-    "home_scan": {"start": 0.6, "end": 7.5, "label": "Guest home / first scan experience", "score": 0.95},
+    "home_scan": {"start": 0.2, "end": 8.0, "label": "Guest home / first scan experience", "score": 0.95},
     "language_switch": {"start": 7.3, "end": 13.8, "label": "Language switching and guest home", "score": 0.91},
     "menu_browse": {"start": 20.4, "end": 29.3, "label": "Clean menu browsing", "score": 0.96},
     "arabic_menu": {"start": 99.2, "end": 105.8, "label": "Arabic menu experience", "score": 0.93},
