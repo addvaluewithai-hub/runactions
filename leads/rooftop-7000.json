@@ -1,0 +1,12 @@
+{
+  "slug": "rooftop-7000",
+  "venue_name": "Rooftop 7000",
+  "timeline": "timelines/qserve_master_v1.json",
+  "clip_library": "factory/clips.json",
+  "assets": {
+    "presenter": {"drive_id": "1uGzt-Wj18sy4H2CISUCVWpR7mC1OBMkn", "filename": "presenter.mp4"},
+    "product": {"drive_id": "1P_hd1WID6X66cem9vmh84DgAYBYSsf37", "filename": "product.mp4"},
+    "qr": {"drive_id": "1rDjrBAmTuqEHvsa_anmXXqKZRXu5862N", "filename": "qr.jpg"},
+    "mockup": {"drive_id": "1MMnUi230vZGUITj9uW1FAjX0ZmFN1MwP", "filename": "mockup.jpg"}
+  }
+}
