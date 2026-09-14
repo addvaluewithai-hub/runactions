@@ -39,9 +39,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
 
       - name: Install media tools
         run: |
@@ -49,45 +46,54 @@ jobs:
           sudo apt-get install -y ffmpeg
           python -m pip install --upgrade gdown
 
-      - name: Download project media
+      - name: Download project assets
         run: |
           mkdir -p "editor/media/$SLUG" /tmp/editor-src
           python - <<'PY'
-          import json, os, subprocess, pathlib
-          slug=os.environ['SLUG']
-          p=json.load(open(f'editor/projects/{slug}.json'))
-          out=pathlib.Path('/tmp/editor-src')
-          for key in ('presenter','product','qr','mockup'):
-              asset=p['media'][key]
-              drive=asset.get('original',{}).get('driveId')
-              if not drive: continue
-              ext='.mp4' if asset['type']=='video' else '.jpg'
-              dest=out/f'{key}{ext}'
-              subprocess.check_call(['gdown', drive, '-O', str(dest)])
+          import json, os, pathlib, subprocess
+
+          slug = os.environ['SLUG']
+          project = json.load(open(f'editor/projects/{slug}.json'))
+          tmp = pathlib.Path('/tmp/editor-src')
+          dest = pathlib.Path('editor/media') / slug
+
+          names = {
+              'qr': 'qr.jpg',
+              'mockup': 'mockup.jpg',
+              'dashboardMenu': 'dashboard_menu.jpg',
+              'dashboardServices': 'dashboard_services.jpg',
+              'dashboardRequests': 'dashboard_requests.jpg',
+              'dashboardPerformance': 'dashboard_performance.jpg',
+          }
+
+          for key, asset in project['media'].items():
+              drive = asset.get('original', {}).get('driveId')
+              if not drive:
+                  continue
+              if asset['type'] == 'video':
+                  target = tmp / f'{key}.mp4'
+              else:
+                  target = dest / names.get(key, f'{key}.jpg')
+              target.parent.mkdir(parents=True, exist_ok=True)
+              subprocess.check_call(['gdown', drive, '-O', str(target)])
           PY
 
       - name: Build lightweight browser proxies
         run: |
           ffmpeg -y -i /tmp/editor-src/presenter.mp4 -vf "scale=360:-2" -c:v libx264 -preset veryfast -crf 34 -c:a aac -b:a 64k -movflags +faststart "editor/media/$SLUG/presenter_proxy.mp4"
-          ffmpeg -y -i /tmp/editor-src/product.mp4 -vf "scale=360:-2" -c:v libx264 -preset veryfast -crf 34 -an -movflags +faststart "editor/media/$SLUG/product_proxy.mp4"
-          cp /tmp/editor-src/qr.jpg "editor/media/$SLUG/qr.jpg"
-          cp /tmp/editor-src/mockup.jpg "editor/media/$SLUG/mockup.jpg"
+          ffmpeg -y -i /tmp/editor-src/product.mp4 -vf "scale=360:-2,fps=30" -c:v libx264 -preset veryfast -crf 34 -an -movflags +faststart "editor/media/$SLUG/product_proxy.mp4"
 
-      - name: Start QServe dashboard for screenshots
+      - name: Verify editor assets
         run: |
-          git clone --depth 1 https://github.com/addvaluewithai-hub/Qserve.git /tmp/qserve
-          cd /tmp/qserve
-          npm install
-          nohup npm run dev -- --host 127.0.0.1 --port 4173 >/tmp/qserve-vite.log 2>&1 &
-          for i in {1..60}; do curl -fsS http://127.0.0.1:4173 >/dev/null && break; sleep 1; done
-          npx -y playwright@1.55.0 install chromium --with-deps
-
-      - name: Capture dashboard screens
-        run: |
-          npx -y playwright@1.55.0 screenshot --viewport-size="1440,1000" --full-page "http://127.0.0.1:4173/dashboard/menu?venue=nile-table&lang=en" "editor/media/$SLUG/dashboard_menu.jpg"
-          npx -y playwright@1.55.0 screenshot --viewport-size="1440,1000" --full-page "http://127.0.0.1:4173/dashboard/services?venue=nile-table&lang=en" "editor/media/$SLUG/dashboard_services.jpg"
-          npx -y playwright@1.55.0 screenshot --viewport-size="1440,1000" --full-page "http://127.0.0.1:4173/dashboard/requests?venue=nile-table&lang=en" "editor/media/$SLUG/dashboard_requests.jpg"
-          npx -y playwright@1.55.0 screenshot --viewport-size="1440,1000" --full-page "http://127.0.0.1:4173/dashboard/performance?venue=nile-table&lang=en" "editor/media/$SLUG/dashboard_performance.jpg"
+          test -s "editor/media/$SLUG/presenter_proxy.mp4"
+          test -s "editor/media/$SLUG/product_proxy.mp4"
+          test -s "editor/media/$SLUG/qr.jpg"
+          test -s "editor/media/$SLUG/mockup.jpg"
+          test -s "editor/media/$SLUG/dashboard_menu.jpg"
+          test -s "editor/media/$SLUG/dashboard_services.jpg"
+          test -s "editor/media/$SLUG/dashboard_requests.jpg"
+          test -s "editor/media/$SLUG/dashboard_performance.jpg"
+          du -h "editor/media/$SLUG"/*
 
       - name: Commit generated editor assets
         run: |
