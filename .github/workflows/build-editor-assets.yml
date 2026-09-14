@@ -7,17 +7,35 @@ on:
         description: Lead project slug
         required: true
         default: rooftop-7000
+  issues:
+    types: [opened]
 
 permissions:
   contents: write
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.title, '[build-editor-assets]')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Resolve project slug
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_SLUG: ${{ inputs.slug }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            SLUG="$INPUT_SLUG"
+          else
+            SLUG="$(printf '%s' "$ISSUE_TITLE" | sed -E 's/^.*\[build-editor-assets\][[:space:]]*//')"
+          fi
+          test -n "$SLUG"
+          echo "SLUG=$SLUG" >> "$GITHUB_ENV"
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -32,8 +50,6 @@ jobs:
           python -m pip install --upgrade gdown
 
       - name: Download project media
-        env:
-          SLUG: ${{ inputs.slug }}
         run: |
           mkdir -p "editor/media/$SLUG" /tmp/editor-src
           python - <<'PY'
@@ -51,8 +67,6 @@ jobs:
           PY
 
       - name: Build lightweight browser proxies
-        env:
-          SLUG: ${{ inputs.slug }}
         run: |
           ffmpeg -y -i /tmp/editor-src/presenter.mp4 -vf "scale=360:-2" -c:v libx264 -preset veryfast -crf 34 -c:a aac -b:a 64k -movflags +faststart "editor/media/$SLUG/presenter_proxy.mp4"
           ffmpeg -y -i /tmp/editor-src/product.mp4 -vf "scale=360:-2" -c:v libx264 -preset veryfast -crf 34 -an -movflags +faststart "editor/media/$SLUG/product_proxy.mp4"
@@ -69,8 +83,6 @@ jobs:
           npx -y playwright@1.55.0 install chromium --with-deps
 
       - name: Capture dashboard screens
-        env:
-          SLUG: ${{ inputs.slug }}
         run: |
           npx -y playwright@1.55.0 screenshot --viewport-size="1440,1000" --full-page "http://127.0.0.1:4173/dashboard/menu?venue=nile-table&lang=en" "editor/media/$SLUG/dashboard_menu.jpg"
           npx -y playwright@1.55.0 screenshot --viewport-size="1440,1000" --full-page "http://127.0.0.1:4173/dashboard/services?venue=nile-table&lang=en" "editor/media/$SLUG/dashboard_services.jpg"
@@ -78,8 +90,6 @@ jobs:
           npx -y playwright@1.55.0 screenshot --viewport-size="1440,1000" --full-page "http://127.0.0.1:4173/dashboard/performance?venue=nile-table&lang=en" "editor/media/$SLUG/dashboard_performance.jpg"
 
       - name: Commit generated editor assets
-        env:
-          SLUG: ${{ inputs.slug }}
         run: |
           git config user.name "qserve-video-bot"
           git config user.email "actions@users.noreply.github.com"
