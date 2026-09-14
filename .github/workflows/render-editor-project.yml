@@ -64,11 +64,13 @@ jobs:
       - name: QA output
         run: |
           EXPECTED="$(python -c "import json; print(json.load(open('editor/projects/$SLUG.json'))['duration'])")"
-          python factory/qa_video.py "output/$SLUG.mp4" --expected-duration "$EXPECTED" --out "output/qa.json"
+          python factory/qa_video.py "output/$SLUG.mp4" --expected-duration "$EXPECTED" --out-dir "output/qa"
 
       - name: Upload render
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: editor-render-${{ env.SLUG }}
           path: output/
+          if-no-files-found: error
           retention-days: 30
