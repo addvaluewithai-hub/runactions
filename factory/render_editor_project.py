@@ -19,9 +19,11 @@ def encode(out, inputs, filt, maps, fps=30):
 
 def pip_filter(w,h,pip,presenter_label='1:v'):
     pw=max(180,int(w*float(pip.get('width',.25))))
+    ph=int(pw*1.28)
     margin=int(pip.get('margin',36)); bottom=int(pip.get('bottom',132)); border=int(pip.get('border',4))
-    # Keep the face window compact and independent from the main composition.
-    prep=(f'[{presenter_label}]scale={pw}:-2,crop={pw}:min(ih,{int(pw*1.28)}):0:0,'
+    # Presenter is portrait footage. Scale by width then take a deterministic compact face window.
+    # Avoid expression commas in crop parameters so the filter graph parses identically across ffmpeg builds.
+    prep=(f'[{presenter_label}]scale={pw}:-2,crop={pw}:{ph}:0:0,'
           f'pad=iw+{border*2}:ih+{border*2}:{border}:{border}:color=white,setsar=1[pip];')
     overlay=f'[base][pip]overlay=W-w-{margin}:H-h-{bottom}:shortest=1,format=yuv420p[v]'
     return prep+overlay
