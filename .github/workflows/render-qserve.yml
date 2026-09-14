@@ -1,0 +1,90 @@
+name: Render QServe personalized video
+
+on:
+  workflow_dispatch:
+    inputs:
+      lead:
+        description: Lead slug from leads/<slug>.json
+        required: true
+        default: rooftop-7000
+  issues:
+    types: [opened]
+
+jobs:
+  render:
+    if: github.event_name != 'issues' || startsWith(github.event.issue.title, '[render-qserve]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve lead slug
+        id: lead
+        shell: bash
+        env:
+          DISPATCH_LEAD: ${{ inputs.lead }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        run: |
+          if [ -n "$DISPATCH_LEAD" ]; then
+            slug="$DISPATCH_LEAD"
+          else
+            slug="${ISSUE_TITLE#\[render-qserve\] }"
+          fi
+          slug="$(echo "$slug" | xargs)"
+          test -n "$slug"
+          test -f "leads/$slug.json"
+          echo "slug=$slug" >> "$GITHUB_OUTPUT"
+          echo "Rendering lead: $slug"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install FFmpeg and Python dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download lead assets
+        run: |
+          python factory/fetch_assets.py --lead "leads/${{ steps.lead.outputs.slug }}.json" --out work
+          ls -lh work
+
+      - name: Inspect approved product ranges
+        run: |
+          mkdir -p qa/source
+          python factory/timeline_view.py work/product.mp4 118 155 -o qa/source/order-flow.jpg --n-frames 16
+          python factory/timeline_view.py work/product.mp4 160 181 -o qa/source/waiter-flow.jpg --n-frames 16
+
+      - name: Render personalized video
+        run: |
+          mkdir -p out
+          python factory/render_qserve.py \
+            --lead "leads/${{ steps.lead.outputs.slug }}.json" \
+            --work work \
+            --out "out/${{ steps.lead.outputs.slug }}.mp4"
+
+      - name: QA rendered output
+        run: |
+          python factory/qa_video.py \
+            "out/${{ steps.lead.outputs.slug }}.mp4" \
+            --expected-duration 99.7 \
+            --out-dir qa/render
+
+      - name: Upload final video and QA
+        uses: actions/upload-artifact@v4
+        with:
+          name: qserve-${{ steps.lead.outputs.slug }}
+          path: |
+            out/${{ steps.lead.outputs.slug }}.mp4
+            qa/
+            leads/${{ steps.lead.outputs.slug }}.json
+            timelines/qserve_master_v1.json
+            factory/clips.json
+          if-no-files-found: error
+          retention-days: 30

@@ -1,59 +1,79 @@
-# QServe Personalized Sales Video Pipeline
+# QServe Video Factory
 
-This repo is the experiment runner for turning one master sales recording into personalized lead videos.
+This repo turns one approved QServe sales-video master into personalized lead videos.
 
-## Current first sample
+The production path is deliberately simple and deterministic:
 
-Lead: **Rooftop 7000**
+1. **Gemini + Faster-Whisper** are used when the master narration or product recording changes, to understand the script and align speech precisely.
+2. The product screen recording is reviewed once and converted into an **approved clip library** (`factory/clips.json`). Bad transitions, browser chrome and unusable moments are not selected at render time.
+3. A reusable **master timeline** (`timelines/qserve_master_v1.json`) defines when to show the presenter, product footage with presenter PiP, the personalized QR visual and the venue-specific QServe mockup.
+4. **FFmpeg** performs deterministic crop, cut, PiP, audio muxing and encoding.
+5. A lightweight `timeline_view.py` creates contact sheets for source ranges and the rendered output, inspired by the text-first / on-demand visual inspection approach used by agentic editors.
+6. Automated QA validates resolution, duration, audio presence and produces a final contact sheet before the artifact is published.
 
-Inputs:
-- Master presenter video from Google Drive
-- QServe mobile screen recording from Google Drive
-- Lead-specific tabletop QR visual
-- Lead-specific QServe app mockup
+## Render a lead
 
-## Pipeline
+The easiest trigger is to open a GitHub issue titled:
 
-1. **Gemini 3.5 Flash-Lite** analyzes the presenter video semantically and identifies moments such as digital menu, call waiter, feedback, management visibility, personalized mockup, and CTA.
-2. **Faster-Whisper large-v3-turbo** produces audio-aligned timestamps. This is important because raw multimodal model timestamps can drift, especially with mobile recordings and odd video metadata.
-3. Gemini receives the audio-aligned transcript and creates semantic edit anchors using those authoritative timestamps.
-4. The product screen recording is segmented into usable shots. Its model-produced timestamps are normalized against the real `ffprobe` duration.
-5. An edit plan JSON defines the 9:16 timeline: QR opener, presenter full-screen, product demo with presenter PiP, personalized mockup, and CTA.
-6. Rendering is deterministic with FFmpeg for the first sample. HyperFrames is a good next layer for reusable web-style motion graphics, brand cards, animated captions, and scalable template rendering, while FFmpeg remains the reliable media cutting/compositing engine.
+```text
+[render-qserve] rooftop-7000
+```
 
-## Personalization model
+Or run the **Render QServe personalized video** workflow manually and enter the lead slug.
 
-The master narration and product footage stay the same. Per lead we swap mainly:
+The workflow uploads an artifact containing:
 
-- `venue_name`
-- `qr_tabletop_image`
-- `personalized_app_mockup`
-- optional logo / palette / venue-specific dashboard screenshots
+- `<lead>.mp4`
+- `qa/render/qa.json`
+- `qa/render/render_contact_sheet.jpg`
+- source contact sheets for the important order/waiter flows
+- the exact lead manifest, master timeline and approved clip library used for the render
 
-That means after the first timeline is approved, the next lead should only require generating the two personalized visuals and running the same render template.
+## Add a new lead
 
-## Dashboard visuals
+Create `leads/<slug>.json`. The presenter video, product recording and master timeline can remain the same; normally only the lead-specific QR image and app mockup change.
 
-The QServe app repo exposes demo routes such as:
+Example:
 
-- `/dashboard/overview?venue=nile-table`
-- `/dashboard/menu?venue=nile-table`
-- `/dashboard/requests?venue=nile-table`
-- `/dashboard/analytics?venue=nile-table`
+```json
+{
+  "slug": "new-venue",
+  "venue_name": "New Venue",
+  "timeline": "timelines/qserve_master_v1.json",
+  "clip_library": "factory/clips.json",
+  "assets": {
+    "presenter": {"drive_id": "...", "filename": "presenter.mp4"},
+    "product": {"drive_id": "...", "filename": "product.mp4"},
+    "qr": {"drive_id": "...", "filename": "qr.jpg"},
+    "mockup": {"drive_id": "...", "filename": "mockup.jpg"}
+  }
+}
+```
 
-Use screenshots from these routes when the narration specifically discusses menu control, service-request status, escalation, or management visibility. Until those screenshots are available, the renderer should prefer presenter footage rather than invent fake dashboard UI.
+Then open:
 
-## Triggering analysis
+```text
+[render-qserve] new-venue
+```
 
-Open an issue whose title contains:
+## Product clip library
 
-`[run-video-analysis]`
+`factory/clips.json` is intentionally curated once rather than asking a model to rediscover the whole 217-second screen recording on every render. Current reusable scenes include guest home, menu browsing, Arabic menu, order-from-table, staff order receipt, request accepted, call waiter and staff waiter receipt.
 
-The workflow downloads both source videos, runs Gemini + Whisper alignment, and uploads a `qserve-video-analysis` artifact containing:
+`factory/timeline_view.py` can inspect any ambiguous source interval on demand:
 
-- `aligned_transcript.json`
-- `aligned_anchors.json`
-- `product_shots_aligned.json`
-- `edit_plan.json`
+```bash
+python factory/timeline_view.py work/product.mp4 160 181 -o waiter-flow.jpg --n-frames 16
+```
 
-The repository secret expected by the workflow is `GEMINI_API_KEY`.
+## Analysis workflow
+
+The existing `analyze-video.yml` remains useful for **master-edit changes**. It downloads the master videos, uses Gemini for semantic understanding and Faster-Whisper for audio-aligned timing, and emits aligned transcript/anchor/edit-plan artifacts.
+
+The render factory does **not** call an LLM for every lead. That keeps repeated personalization fast, cheap and reproducible.
+
+## Secrets / requirements
+
+The analysis workflow expects `GEMINI_API_KEY`.
+
+The render workflow does not need an AI API key; it downloads assets from Google Drive, uses FFmpeg/Python, validates the output and publishes a GitHub Actions artifact.

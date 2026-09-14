@@ -1,0 +1,22 @@
+{
+  "canvas": {"width": 1080, "height": 1920, "fps": 30},
+  "duration": 99.7,
+  "segments": [
+    {"start": 0.0, "end": 3.12, "layout": "qr_full"},
+    {"start": 3.12, "end": 9.52, "layout": "presenter_full"},
+    {"start": 9.52, "end": 16.9, "layout": "product_with_pip", "clip": "home_scan"},
+    {"start": 16.9, "end": 25.26, "layout": "product_with_pip", "clip": "menu_browse"},
+    {"start": 25.26, "end": 32.9, "layout": "presenter_full"},
+    {"start": 32.9, "end": 37.9, "layout": "product_with_pip", "clip": "call_waiter"},
+    {"start": 37.9, "end": 43.52, "layout": "product_with_pip", "clip": "waiter_staff_received"},
+    {"start": 43.52, "end": 48.4, "layout": "product_with_pip", "clip": "order_from_table"},
+    {"start": 48.4, "end": 53.2, "layout": "product_with_pip", "clip": "staff_order_received"},
+    {"start": 53.2, "end": 57.44, "layout": "product_with_pip", "clip": "order_accepted"},
+    {"start": 57.44, "end": 64.2, "layout": "presenter_full"},
+    {"start": 64.2, "end": 70.2, "layout": "product_with_pip", "clip": "language_switch"},
+    {"start": 70.2, "end": 76.04, "layout": "product_with_pip", "clip": "arabic_menu"},
+    {"start": 76.04, "end": 84.04, "layout": "presenter_full"},
+    {"start": 84.04, "end": 90.08, "layout": "mockup_full"},
+    {"start": 90.08, "end": 99.7, "layout": "presenter_full"}
+  ]
+}
