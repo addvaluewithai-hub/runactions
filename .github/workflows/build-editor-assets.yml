@@ -63,7 +63,7 @@ jobs:
               if not drive: continue
               ext='.mp4' if asset['type']=='video' else '.jpg'
               dest=out/f'{key}{ext}'
-              subprocess.check_call(['gdown','--id',drive,'-O',str(dest)])
+              subprocess.check_call(['gdown', drive, '-O', str(dest)])
           PY
 
       - name: Build lightweight browser proxies
