@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>QServe Video Editor</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand"><span>Q</span><div><strong>QServe Video Editor</strong><small>Collaborative sales-video timeline</small></div></div>
+      <div class="project-meta"><strong id="projectTitle">Loading…</strong><small id="projectStatus">Draft</small></div>
+      <div class="top-actions">
+        <button id="undoBtn" class="ghost">Undo</button>
+        <button id="resetBtn" class="ghost">Reset draft</button>
+        <button id="exportBtn" class="ghost">Export JSON</button>
+        <label class="ghost file-label">Import JSON<input id="importInput" type="file" accept="application/json" /></label>
+        <button id="saveBtn" class="primary">Save project</button>
+        <button id="renderBtn" class="accent">Render</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="preview-panel panel">
+        <div class="panel-head"><span>Preview</span><div class="transport"><button id="playBtn">▶</button><span id="timeLabel">00:00.0 / 00:00.0</span></div></div>
+        <div class="stage-wrap">
+          <div id="stage" class="stage">
+            <video id="presenterVideo" playsinline preload="metadata"></video>
+            <video id="productVideo" playsinline preload="metadata" muted></video>
+            <img id="stillImage" alt="" />
+            <div id="pipFrame" class="pip-frame"></div>
+            <div id="missingMedia" class="missing-media">Media proxy missing.<br><small>Run the editor-assets workflow once.</small></div>
+          </div>
+        </div>
+        <input id="scrubber" class="scrubber" type="range" min="0" max="100" step="0.01" value="0" />
+      </section>
+
+      <aside class="inspector panel">
+        <div class="panel-head"><span>Inspector</span></div>
+        <div id="emptyInspector" class="empty-state">Select a clip on the timeline.</div>
+        <form id="clipForm" class="clip-form hidden" onsubmit="return false">
+          <label>Label<input id="clipLabel" /></label>
+          <div class="two-col">
+            <label>Timeline start<input id="clipStart" type="number" step="0.1" /></label>
+            <label>Timeline end<input id="clipEnd" type="number" step="0.1" /></label>
+          </div>
+          <div class="two-col source-fields">
+            <label>Source in<input id="sourceIn" type="number" step="0.1" /></label>
+            <label>Source out<input id="sourceOut" type="number" step="0.1" /></label>
+          </div>
+          <label>Asset<select id="clipAsset"></select></label>
+          <div class="two-col">
+            <label>Fit<select id="clipFit"><option value="cover">Cover</option><option value="contain">Contain</option></select></label>
+            <label>Motion<select id="clipMotion"><option value="">None</option><option value="slowZoom">Slow zoom</option><option value="focusCenter">Focus center</option><option value="focusRight">Focus right</option><option value="focusTop">Focus top</option></select></label>
+          </div>
+          <label class="check"><input id="clipPip" type="checkbox" /> Presenter picture-in-picture</label>
+          <div class="inspector-actions"><button id="duplicateBtn" type="button" class="ghost">Duplicate</button><button id="deleteBtn" type="button" class="danger">Delete clip</button></div>
+        </form>
+        <hr />
+        <div class="pip-settings">
+          <strong>Presenter overlay</strong>
+          <label>Width <input id="pipWidth" type="range" min="0.16" max="0.38" step="0.01" /></label>
+          <label>Bottom <input id="pipBottom" type="range" min="24" max="420" step="4" /></label>
+          <label>Margin <input id="pipMargin" type="range" min="12" max="120" step="4" /></label>
+        </div>
+      </aside>
+
+      <section class="timeline-panel panel">
+        <div class="timeline-toolbar">
+          <div><strong>Timeline</strong><small>Drag clips · drag edges to trim · click to edit</small></div>
+          <div class="zoom-control">Zoom <input id="zoomRange" type="range" min="8" max="42" step="1" /></div>
+        </div>
+        <div id="timelineScroll" class="timeline-scroll">
+          <div id="timelineCanvas" class="timeline-canvas">
+            <div id="ruler" class="ruler"></div>
+            <div id="playhead" class="playhead"></div>
+            <div class="track-row">
+              <div class="track-label"><strong>V1</strong><span>Main visual</span></div>
+              <div id="visualTrack" class="track-lane"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer-note">Draft changes can live locally, or be saved to GitHub through the Cloudflare Pages Function. The approved master is always recoverable.</footer>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
