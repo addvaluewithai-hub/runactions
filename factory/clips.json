@@ -1,0 +1,24 @@
+{
+  "source": "product.mp4",
+  "notes": "Approved reusable ranges from the master QServe mobile recording. Browser chrome / black bars are removed at render time.",
+  "transform": {
+    "scale_width": 1080,
+    "crop_height": 1920,
+    "crop_y": 244,
+    "pip_width": 300,
+    "pip_x_margin": 36,
+    "pip_y": 80
+  },
+  "clips": {
+    "home_scan": {"start": 0.6, "end": 7.5, "label": "Guest home / first scan experience", "score": 0.95},
+    "language_switch": {"start": 7.3, "end": 13.8, "label": "Language switching and guest home", "score": 0.91},
+    "menu_browse": {"start": 20.4, "end": 29.3, "label": "Clean menu browsing", "score": 0.96},
+    "arabic_menu": {"start": 99.2, "end": 105.8, "label": "Arabic menu experience", "score": 0.93},
+    "order_from_table": {"start": 120.8, "end": 126.5, "label": "Guest order / cart submission", "score": 0.95},
+    "staff_order_received": {"start": 132.0, "end": 138.0, "label": "Food order appears to staff", "score": 0.95},
+    "order_accepted": {"start": 148.0, "end": 153.4, "label": "Guest sees accepted request state", "score": 0.92},
+    "call_waiter": {"start": 164.0, "end": 170.2, "label": "Guest call waiter flow", "score": 0.98},
+    "waiter_staff_received": {"start": 170.0, "end": 176.1, "label": "Waiter request received by staff", "score": 0.96},
+    "waiter_accepted": {"start": 175.5, "end": 180.1, "label": "Waiter request accepted", "score": 0.92}
+  }
+}
