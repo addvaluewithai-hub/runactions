@@ -117,11 +117,28 @@ def main():
           render_image(path,presenter,start,dur,out,w,h,fps,pip if c.get('pip') else None,c.get('motion',''))
         segs.append(out); expected=end
       if abs(expected-total)>.08: raise ValueError(f'Timeline ends at {expected:.3f}, expected {total:.3f}')
+
       concat=td/'concat.txt'; concat.write_text('\n'.join(f"file '{x.as_posix()}'" for x in segs)+'\n')
       visuals=td/'visuals.mp4'
       run(['ffmpeg','-hide_banner','-loglevel','error','-y','-f','concat','-safe','0','-i',concat,'-c','copy',visuals])
+
       output=Path(args.out); output.parent.mkdir(parents=True,exist_ok=True)
-      run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',visuals,'-i',presenter,'-map','0:v:0','-map','1:a:0?','-c:v','copy','-c:a','aac','-b:a','192k','-t',f'{total:.3f}','-movflags','+faststart',output])
+      # MP4 concat-copy can end a few frames short after many independently encoded
+      # segments. Re-encode the final composite once, clone the last visual frame and
+      # pad audio, then trim both streams to the project duration. This guarantees the
+      # deliverable has a continuous video stream for the full declared timeline.
+      final_filter=(
+        f'[0:v]tpad=stop_mode=clone:stop_duration=1.0,fps={fps},format=yuv420p[v];'
+        f'[1:a]apad=pad_dur=1.0[a]'
+      )
+      run([
+        'ffmpeg','-hide_banner','-loglevel','error','-y',
+        '-i',visuals,'-i',presenter,
+        '-filter_complex',final_filter,
+        '-map','[v]','-map','[a]',
+        '-c:v','libx264','-preset','veryfast','-crf','19','-pix_fmt','yuv420p',
+        '-c:a','aac','-b:a','192k','-t',f'{total:.3f}','-movflags','+faststart',output
+      ])
     print(f'Rendered {output}')
 
 if __name__=='__main__': main()
