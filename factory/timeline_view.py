@@ -13,19 +13,36 @@ def extract_frame(video: Path, ts: float, out: Path, width: int = 270):
         "-ss", f"{ts:.3f}", "-i", str(video), "-frames:v", "1",
         "-vf", f"scale={width}:-2", str(out),
     ], check=True)
+    if not out.exists() or out.stat().st_size == 0:
+        raise RuntimeError(f"No frame produced at {ts:.3f}s")
 
 
 def build_sheet(video: Path, start: float, end: float, output: Path, n_frames: int = 12, columns: int = 4):
     if end <= start:
         raise ValueError("end must be greater than start")
     n_frames = max(2, n_frames)
-    times = [start + (end - start) * i / (n_frames - 1) for i in range(n_frames)]
+
+    # Sampling exactly at the container duration can legitimately produce no frame:
+    # the duration marks the end boundary, while the final frame timestamp is earlier.
+    # Stay a little inside the media so QA contact-sheet generation is deterministic.
+    span = end - start
+    tail_guard = min(0.10, span / max(n_frames, 2))
+    sample_end = max(start, end - tail_guard)
+    times = [start + (sample_end - start) * i / (n_frames - 1) for i in range(n_frames)]
+
     with tempfile.TemporaryDirectory(prefix="timeline-view-") as td:
         td = Path(td)
         frames = []
         for i, ts in enumerate(times):
             p = td / f"{i:03d}.jpg"
-            extract_frame(video, ts, p)
+            try:
+                extract_frame(video, ts, p)
+            except RuntimeError:
+                # Be tolerant of sparse/VFR media: walk back slightly, but never
+                # before the requested start point.
+                fallback = max(start, ts - 0.10)
+                extract_frame(video, fallback, p)
+                ts = fallback
             frames.append((ts, Image.open(p).convert("RGB")))
 
         thumb_w = frames[0][1].width
