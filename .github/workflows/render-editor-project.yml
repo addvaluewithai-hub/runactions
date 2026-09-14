@@ -1,0 +1,74 @@
+name: Render editable QServe project
+
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: Project slug in editor/projects
+        required: true
+        default: rooftop-7000
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.title, '[render-editor]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve project slug
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_SLUG: ${{ inputs.slug }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            SLUG="$INPUT_SLUG"
+          else
+            SLUG="$(printf '%s' "$ISSUE_TITLE" | sed -E 's/^.*\[render-editor\][[:space:]]*//')"
+          fi
+          test -n "$SLUG"
+          echo "SLUG=$SLUG" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade gdown pillow
+
+      - name: Download original lead assets
+        run: |
+          mkdir -p work output
+          python - <<'PY'
+          import json, os, subprocess
+          slug=os.environ['SLUG']; p=json.load(open(f'editor/projects/{slug}.json'))
+          names={'presenter':'presenter.mp4','product':'product.mp4','qr':'qr.jpg','mockup':'mockup.jpg'}
+          for key,name in names.items():
+              drive=p['media'][key].get('original',{}).get('driveId')
+              if not drive: raise SystemExit(f'Missing Drive id for {key}')
+              subprocess.check_call(['gdown','--id',drive,'-O',f'work/{name}'])
+          PY
+
+      - name: Render timeline
+        run: |
+          python factory/render_editor_project.py --project "editor/projects/$SLUG.json" --work work --out "output/$SLUG.mp4"
+
+      - name: QA output
+        run: |
+          EXPECTED="$(python -c "import json; print(json.load(open('editor/projects/$SLUG.json'))['duration'])")"
+          python factory/qa_video.py "output/$SLUG.mp4" --expected-duration "$EXPECTED" --out "output/qa.json"
+
+      - name: Upload render
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-render-${{ env.SLUG }}
+          path: output/
+          retention-days: 30

@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "slug": "rooftop-7000",
+  "title": "Rooftop 7000 × QServe — Master V3",
+  "duration": 99.733,
+  "fps": 30,
+  "canvas": {"width": 1080, "height": 1920, "aspect": "9:16"},
+  "audio": {"asset": "presenter", "sourceIn": 0, "sourceOut": 99.733},
+  "media": {
+    "presenter": {"type": "video", "src": "/media/rooftop-7000/presenter_proxy.mp4", "original": {"driveId": "1uGzt-Wj18sy4H2CISUCVWpR7mC1OBMkn"}},
+    "product": {"type": "video", "src": "/media/rooftop-7000/product_proxy.mp4", "original": {"driveId": "1P_hd1WID6X66cem9vmh84DgAYBYSsf37"}, "crop": {"top": 118, "bottom": 110}},
+    "qr": {"type": "image", "src": "/media/rooftop-7000/qr.jpg", "original": {"driveId": "1rDjrBAmTuqEHvsa_anmXXqKZRXu5862N"}},
+    "mockup": {"type": "image", "src": "/media/rooftop-7000/mockup.jpg", "original": {"driveId": "1MMnUi230vZGUITj9uW1FAjX0ZmFN1MwP"}},
+    "dashboardMenu": {"type": "image", "src": "/media/rooftop-7000/dashboard_menu.jpg"},
+    "dashboardServices": {"type": "image", "src": "/media/rooftop-7000/dashboard_services.jpg"},
+    "dashboardRequests": {"type": "image", "src": "/media/rooftop-7000/dashboard_requests.jpg"},
+    "dashboardPerformance": {"type": "image", "src": "/media/rooftop-7000/dashboard_performance.jpg"}
+  },
+  "tracks": [
+    {
+      "id": "visual",
+      "name": "Main Visual",
+      "kind": "visual",
+      "clips": [
+        {"id": "qr-open", "asset": "qr", "label": "Personalized QR opener", "start": 0, "end": 4.0, "fit": "cover", "motion": "slowZoom"},
+        {"id": "presenter-intro", "asset": "presenter", "label": "Presenter intro", "start": 4.0, "end": 18.4, "sourceIn": 4.0, "sourceOut": 18.4, "fit": "cover"},
+        {"id": "menu-clean", "asset": "product", "label": "Menu — loaded food images", "start": 18.4, "end": 30.4, "sourceIn": 42.0, "sourceOut": 54.0, "fit": "contain", "pip": true},
+        {"id": "call-waiter", "asset": "product", "label": "Call waiter flow", "start": 30.4, "end": 39.0, "sourceIn": 164.0, "sourceOut": 172.6, "fit": "contain", "pip": true},
+        {"id": "waiter-received", "asset": "product", "label": "Waiter receives request", "start": 39.0, "end": 47.2, "sourceIn": 170.2, "sourceOut": 178.4, "fit": "contain", "pip": true},
+        {"id": "menu-control", "asset": "dashboardMenu", "label": "Dashboard — menu control", "start": 47.2, "end": 57.4, "fit": "cover", "motion": "focusRight", "pip": true},
+        {"id": "service-control", "asset": "dashboardServices", "label": "Dashboard — service rules", "start": 57.4, "end": 67.0, "fit": "cover", "motion": "focusCenter", "pip": true},
+        {"id": "feedback", "asset": "product", "label": "Feedback + Google review", "start": 67.0, "end": 76.0, "sourceIn": 203.0, "sourceOut": 212.0, "fit": "contain", "pip": true},
+        {"id": "requests", "asset": "dashboardRequests", "label": "Dashboard — live requests", "start": 76.0, "end": 82.4, "fit": "cover", "motion": "focusCenter", "pip": true},
+        {"id": "performance", "asset": "dashboardPerformance", "label": "Dashboard — performance", "start": 82.4, "end": 86.0, "fit": "cover", "motion": "focusTop", "pip": true},
+        {"id": "personalized-mockup", "asset": "mockup", "label": "Rooftop 7000 personalized concept", "start": 86.0, "end": 94.0, "fit": "cover", "motion": "slowZoom", "pip": true},
+        {"id": "presenter-cta", "asset": "presenter", "label": "Presenter CTA", "start": 94.0, "end": 99.733, "sourceIn": 94.0, "sourceOut": 99.733, "fit": "cover"}
+      ]
+    }
+  ],
+  "pip": {"asset": "presenter", "position": "bottom-right", "width": 0.25, "margin": 36, "bottom": 132, "radius": 30, "border": 4},
+  "editor": {"snap": 0.1, "pxPerSecond": 18, "masterLocked": false, "approvedMaster": "v3-professional"}
+}
