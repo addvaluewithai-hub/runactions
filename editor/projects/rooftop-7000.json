@@ -11,10 +11,10 @@
     "product": {"type": "video", "src": "/media/rooftop-7000/product_proxy.mp4", "original": {"driveId": "1P_hd1WID6X66cem9vmh84DgAYBYSsf37"}, "crop": {"top": 118, "bottom": 110}},
     "qr": {"type": "image", "src": "/media/rooftop-7000/qr.jpg", "original": {"driveId": "1rDjrBAmTuqEHvsa_anmXXqKZRXu5862N"}},
     "mockup": {"type": "image", "src": "/media/rooftop-7000/mockup.jpg", "original": {"driveId": "1MMnUi230vZGUITj9uW1FAjX0ZmFN1MwP"}},
-    "dashboardMenu": {"type": "image", "src": "/media/rooftop-7000/dashboard_menu.jpg"},
-    "dashboardServices": {"type": "image", "src": "/media/rooftop-7000/dashboard_services.jpg"},
-    "dashboardRequests": {"type": "image", "src": "/media/rooftop-7000/dashboard_requests.jpg"},
-    "dashboardPerformance": {"type": "image", "src": "/media/rooftop-7000/dashboard_performance.jpg"}
+    "dashboardMenu": {"type": "image", "src": "/media/rooftop-7000/dashboard_menu.jpg", "original": {"driveId": "1tEUxPeNHVQQ698G3vnSBzAP17DiKeSSc"}},
+    "dashboardServices": {"type": "image", "src": "/media/rooftop-7000/dashboard_services.jpg", "original": {"driveId": "1sX-nXHn6shXA4jyzmBrSqKFHf0kkWRT2"}},
+    "dashboardRequests": {"type": "image", "src": "/media/rooftop-7000/dashboard_requests.jpg", "original": {"driveId": "1cvjaZZDpKwFqwfdVVe6Ti3YW2Dt3eDn_"}},
+    "dashboardPerformance": {"type": "image", "src": "/media/rooftop-7000/dashboard_performance.jpg", "original": {"driveId": "1v6v5vlOH41tYYpU_w_jpQUcwQt31SCXw"}}
   },
   "tracks": [
     {
