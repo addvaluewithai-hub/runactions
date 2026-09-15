@@ -1,6 +1,6 @@
 # QServe Video Editor
 
-A lightweight collaborative timeline editor for the personalized QServe sales-video factory.
+A lightweight collaborative multitrack editor for the personalized QServe sales-video factory.
 
 ## Deploy on Cloudflare Pages
 
@@ -25,35 +25,30 @@ Optional:
 
 Never put the GitHub token in browser JavaScript. It stays inside the Cloudflare Function.
 
-## First-time media setup
-
-Run the GitHub Action **Build QServe editor assets** with `slug=rooftop-7000`. It creates lightweight presenter/product proxies plus QR, mockup and dashboard screenshots under `editor/media/rooftop-7000/` and commits them to `main`.
-
-The browser editor uses only those lightweight proxies. Final renders always use the original high-resolution Drive sources.
-
-## Collaboration model
-
-- `editor/projects/<slug>.json` is the shared source of truth.
-- Browser edits are stored locally immediately.
-- **Save project** publishes the JSON back to GitHub through the Cloudflare Function.
-- ChatGPT can modify the same JSON in GitHub, so both human and AI edits land on the same timeline.
-- **Reset draft** restores the last published master.
-- **Export JSON** gives a portable backup.
-- **Render** saves first, then dispatches the deterministic GitHub Action renderer.
-
-Open a project with:
+Open Rooftop with:
 
 `/?project=rooftop-7000`
 
 ## Current editor controls
 
-- play/pause and frame-position scrubber
-- drag clips horizontally
-- drag left/right edges to trim
-- numeric timeline/source in/out editing
-- choose media asset, fit and still-image motion
-- toggle presenter picture-in-picture
-- adjust presenter overlay width, bottom offset and right margin
-- undo, reset, JSON import/export
+The editor now exposes the broader editing surface so we can evaluate whether this custom product is enough for QServe:
 
-The editor is intentionally smaller than a general-purpose NLE: it exposes the controls that matter for this repeatable sales-video format without giving up deterministic server-side rendering.
+- multitrack timeline: main video, two overlay tracks, presenter track, graphics/highlights track
+- drag clips horizontally and trim both edges
+- split clip at playhead
+- duration/start/end and source in/out editing
+- scene library with approved product/dashboard shots and one-click scene replacement
+- insert a scene as an overlay instead of replacing the main scene
+- add independent presenter clips anywhere on the timeline
+- add text overlays and highlight boxes
+- move a clip between tracks
+- transform controls: X/Y, width/height, scale, rotation, opacity, radius and border
+- cover / contain / fill modes
+- fade and zoom transition controls in preview; fade transitions are rendered server-side
+- magnetic main-track cut editing, snapping and safe-area overlay
+- global presenter position/size/radius preset
+- undo / redo, local drafts, reset, JSON import/export
+- Save publishes the shared project JSON back to GitHub
+- Render dispatches the deterministic GitHub Actions renderer
+
+The final renderer supports main-scene edits plus multitrack image/video/presenter overlays, text, highlight boxes, transforms, opacity, borders and fades. The editor remains intentionally narrower than Premiere/CapCut: it is optimized for this repeatable sales-video format rather than becoming a general NLE.
