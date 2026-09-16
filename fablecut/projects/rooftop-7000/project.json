@@ -14,14 +14,14 @@
     {"id": "A1", "kind": "audio"}
   ],
   "media": [
-    {"id": "m_presenter", "name": "Presenter", "kind": "video", "src": "/media/rooftop-7000/presenter.mp4", "duration": 99.715, "width": 1080, "height": 1920},
-    {"id": "m_product", "name": "QServe guest app recording", "kind": "video", "src": "/media/rooftop-7000/product.mp4", "duration": 217.405, "width": 574, "height": 1280},
-    {"id": "m_qr", "name": "Rooftop 7000 QR", "kind": "image", "src": "/media/rooftop-7000/qr.jpg", "width": 1122, "height": 1402},
-    {"id": "m_mockup", "name": "Rooftop 7000 personalized app", "kind": "image", "src": "/media/rooftop-7000/mockup.jpg", "width": 941, "height": 1672},
-    {"id": "m_dashboard_menu", "name": "Dashboard — Menu", "kind": "image", "src": "/media/rooftop-7000/dashboard_menu.jpg"},
-    {"id": "m_dashboard_services", "name": "Dashboard — Services", "kind": "image", "src": "/media/rooftop-7000/dashboard_services.jpg"},
-    {"id": "m_dashboard_requests", "name": "Dashboard — Requests", "kind": "image", "src": "/media/rooftop-7000/dashboard_requests.jpg"},
-    {"id": "m_dashboard_performance", "name": "Dashboard — Performance", "kind": "image", "src": "/media/rooftop-7000/dashboard_performance.jpg"}
+    {"id": "m_presenter", "name": "Presenter", "kind": "video", "src": "/media/rooftop-7000-presenter.mp4", "duration": 99.715, "width": 1080, "height": 1920},
+    {"id": "m_product", "name": "QServe guest app recording", "kind": "video", "src": "/media/rooftop-7000-product.mp4", "duration": 217.405, "width": 574, "height": 1280},
+    {"id": "m_qr", "name": "Rooftop 7000 QR", "kind": "image", "src": "/media/rooftop-7000-qr.jpg", "width": 1122, "height": 1402},
+    {"id": "m_mockup", "name": "Rooftop 7000 personalized app", "kind": "image", "src": "/media/rooftop-7000-mockup.jpg", "width": 941, "height": 1672},
+    {"id": "m_dashboard_menu", "name": "Dashboard — Menu", "kind": "image", "src": "/media/rooftop-7000-dashboard-menu.jpg"},
+    {"id": "m_dashboard_services", "name": "Dashboard — Services", "kind": "image", "src": "/media/rooftop-7000-dashboard-services.jpg"},
+    {"id": "m_dashboard_requests", "name": "Dashboard — Requests", "kind": "image", "src": "/media/rooftop-7000-dashboard-requests.jpg"},
+    {"id": "m_dashboard_performance", "name": "Dashboard — Performance", "kind": "image", "src": "/media/rooftop-7000-dashboard-performance.jpg"}
   ],
   "clips": [
     {
