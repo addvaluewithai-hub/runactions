@@ -32,6 +32,26 @@ if needle not in s:
 p.write_text(s.replace(needle, insert, 1))
 PY
 
+# Static manifest keeps FableCut's built-in SFX/elements/SVG/fonts library fully
+# usable on Pages even though there is no persistent Node /api/library server.
+python - "$OUT" <<'PY'
+from pathlib import Path
+import json, sys, urllib.parse
+root = Path(sys.argv[1])
+lib = root / 'library'
+out = {}
+for kind in ('sfx','elements','svg','fonts'):
+    base = lib / kind
+    items = []
+    if base.exists():
+        for f in sorted(p for p in base.rglob('*') if p.is_file()):
+            rel = f.relative_to(base).as_posix()
+            src = '/library/' + kind + '/' + '/'.join(urllib.parse.quote(part) for part in rel.split('/'))
+            items.append({'name': f.name, 'rel': rel, 'size': f.stat().st_size, 'src': src})
+    out[kind] = items
+(root / 'library-manifest.json').write_text(json.dumps(out, ensure_ascii=False, separators=(',',':')))
+PY
+
 # Seed projects are public read-only fallbacks. User edits are saved by /api/project
 # into the QSERVE_PROJECTS R2 binding, never committed back to GitHub from the browser.
 mkdir -p "$OUT/projects"
@@ -41,17 +61,17 @@ for d in fablecut/projects/*; do
   cp "$d/project.json" "$OUT/projects/$slug.json"
 done
 
-# Browser previews use lightweight proxies under the same paths that production
-# originals use in CI. That keeps the project.json portable between Pages and Actions.
-mkdir -p "$OUT/media/rooftop-7000"
-cp editor/media/rooftop-7000/presenter_proxy.mp4 "$OUT/media/rooftop-7000/presenter.mp4"
-cp editor/media/rooftop-7000/product_proxy.mp4 "$OUT/media/rooftop-7000/product.mp4"
-cp editor/media/rooftop-7000/qr.jpg "$OUT/media/rooftop-7000/qr.jpg"
-cp editor/media/rooftop-7000/mockup.jpg "$OUT/media/rooftop-7000/mockup.jpg"
-cp editor/media/rooftop-7000/dashboard_menu.jpg "$OUT/media/rooftop-7000/dashboard_menu.jpg"
-cp editor/media/rooftop-7000/dashboard_services.jpg "$OUT/media/rooftop-7000/dashboard_services.jpg"
-cp editor/media/rooftop-7000/dashboard_requests.jpg "$OUT/media/rooftop-7000/dashboard_requests.jpg"
-cp editor/media/rooftop-7000/dashboard_performance.jpg "$OUT/media/rooftop-7000/dashboard_performance.jpg"
+# Browser preview assets are deliberately lightweight proxies. FableCut's stock
+# Node server treats /media as flat, so QServe namespaces filenames with the lead slug.
+mkdir -p "$OUT/media"
+cp editor/media/rooftop-7000/presenter_proxy.mp4 "$OUT/media/rooftop-7000-presenter.mp4"
+cp editor/media/rooftop-7000/product_proxy.mp4 "$OUT/media/rooftop-7000-product.mp4"
+cp editor/media/rooftop-7000/qr.jpg "$OUT/media/rooftop-7000-qr.jpg"
+cp editor/media/rooftop-7000/mockup.jpg "$OUT/media/rooftop-7000-mockup.jpg"
+cp editor/media/rooftop-7000/dashboard_menu.jpg "$OUT/media/rooftop-7000-dashboard-menu.jpg"
+cp editor/media/rooftop-7000/dashboard_services.jpg "$OUT/media/rooftop-7000-dashboard-services.jpg"
+cp editor/media/rooftop-7000/dashboard_requests.jpg "$OUT/media/rooftop-7000-dashboard-requests.jpg"
+cp editor/media/rooftop-7000/dashboard_performance.jpg "$OUT/media/rooftop-7000-dashboard-performance.jpg"
 
 cat > "$OUT/_headers" <<'EOF'
 /*
@@ -64,7 +84,10 @@ cat > "$OUT/_headers" <<'EOF'
 
 /projects/*
   Cache-Control: no-store
+
+/library-manifest.json
+  Cache-Control: public, max-age=3600
 EOF
 
 echo "Built $OUT"
-find "$OUT" -maxdepth 2 -type f -printf '%p %k KB\n' | sort | head -80
+find "$OUT" -maxdepth 2 -type f -printf '%p %k KB\n' | sort | head -100
