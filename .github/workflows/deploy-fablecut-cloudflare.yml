@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if npx --yes wrangler@latest r2 bucket list --remote 2>&1 | tee /tmp/r2-buckets.txt | grep -Fq "$R2_BUCKET"; then
+          if npx --yes wrangler@latest r2 bucket list 2>&1 | tee /tmp/r2-buckets.txt | grep -Fq "$R2_BUCKET"; then
             echo "R2 bucket $R2_BUCKET already exists"
           else
             echo "Creating R2 bucket $R2_BUCKET"
@@ -85,15 +85,7 @@ jobs:
             if curl -fsS --max-time 20 "$BASE/?project=rooftop-7000" -o /tmp/editor.html \
               && grep -Fq 'FableCut' /tmp/editor.html \
               && curl -fsS --max-time 20 "$BASE/api/project?project=rooftop-7000" -o /tmp/project.json \
-              && python - <<'PY'
-import json
-p=json.load(open('/tmp/project.json'))
-assert p.get('name')
-assert isinstance(p.get('clips'), list) and p['clips']
-assert isinstance(p.get('media'), list) and p['media']
-print('R2 project revision:', p.get('revision'))
-PY
-            then
+              && python -c "import json; p=json.load(open('/tmp/project.json')); assert p.get('name'); assert isinstance(p.get('clips'), list) and p['clips']; assert isinstance(p.get('media'), list) and p['media']; print('R2 project revision:', p.get('revision'))"; then
               echo "Production editor smoke test passed: $BASE/?project=rooftop-7000"
               exit 0
             fi
