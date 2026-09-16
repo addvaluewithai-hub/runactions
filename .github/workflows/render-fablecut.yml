@@ -1,0 +1,177 @@
+name: Render QServe FableCut project
+
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: QServe FableCut project slug
+        required: true
+        default: rooftop-7000
+      project_url:
+        description: Optional saved Cloudflare project JSON URL
+        required: false
+        default: ''
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[render-fablecut]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve render request
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_SLUG: ${{ inputs.slug }}
+          INPUT_PROJECT_URL: ${{ inputs.project_url }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            SLUG="$INPUT_SLUG"
+            PROJECT_URL="$INPUT_PROJECT_URL"
+          else
+            SLUG="$(printf '%s' "$ISSUE_TITLE" | sed -E 's/^\[render-fablecut\][[:space:]]*//')"
+            PROJECT_URL="$(printf '%s\n' "$ISSUE_BODY" | sed -n -E 's/^project_url:[[:space:]]*(https?:\/\/[^[:space:]]+)[[:space:]]*$/\1/p' | head -1)"
+          fi
+          test -n "$SLUG"
+          test -f "fablecut/projects/$SLUG/manifest.json"
+          echo "SLUG=$SLUG" >> "$GITHUB_ENV"
+          echo "PROJECT_URL=$PROJECT_URL" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install render dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg xvfb
+          python -m pip install --upgrade gdown pillow
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Fetch pinned FableCut
+        run: |
+          COMMIT="$(python -c "import json; print(json.load(open('fablecut/projects/$SLUG/manifest.json'))['fablecutCommit'])")"
+          git clone --quiet --no-checkout https://github.com/ronak-create/FableCut.git /tmp/fablecut
+          git -C /tmp/fablecut checkout --quiet "$COMMIT"
+          echo "FABLECUT_COMMIT=$COMMIT" >> "$GITHUB_ENV"
+
+      - name: Fetch latest saved timeline
+        run: |
+          rm -rf fablecut-data output
+          mkdir -p fablecut-data/media fablecut-data/exports output
+          if [ -n "$PROJECT_URL" ]; then
+            echo "Fetching saved editor timeline from $PROJECT_URL"
+            curl --fail --location --retry 3 --header 'Cache-Control: no-cache' "$PROJECT_URL" -o fablecut-data/project.json
+          else
+            echo "No Cloudflare URL supplied; using repository seed"
+            cp "fablecut/projects/$SLUG/project.json" fablecut-data/project.json
+          fi
+          python -m json.tool fablecut-data/project.json >/dev/null
+
+      - name: Prepare production media
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, subprocess, urllib.parse, urllib.request
+
+          slug = os.environ['SLUG']
+          project_url = os.environ.get('PROJECT_URL', '').strip()
+          manifest = json.load(open(f'fablecut/projects/{slug}/manifest.json'))
+          project_path = pathlib.Path('fablecut-data/project.json')
+          project = json.load(open(project_path))
+          media_dir = pathlib.Path('fablecut-data/media')
+          media_dir.mkdir(parents=True, exist_ok=True)
+
+          known = manifest.get('media', {})
+          for item in project.get('media', []):
+              mid = item.get('id')
+              src = str(item.get('src') or '')
+              meta = known.get(mid)
+              if meta and meta.get('driveId'):
+                  rel = pathlib.PurePosixPath(meta['filename'])
+                  target = media_dir / pathlib.Path(*rel.parts)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  print(f'Downloading production original for {mid} -> {target}')
+                  subprocess.check_call(['gdown', meta['driveId'], '-O', str(target)])
+                  item['src'] = '/media/' + rel.as_posix()
+                  continue
+
+              # User-imported media is fetched from the editor origin when possible.
+              if not project_url:
+                  raise SystemExit(f'Unknown media {mid} ({src}) and no project_url was supplied')
+              absolute = urllib.parse.urljoin(project_url, src)
+              parsed = urllib.parse.urlparse(absolute)
+              name = pathlib.PurePosixPath(parsed.path).name or f'{mid}.bin'
+              safe = ''.join(c if c.isalnum() or c in '._- ' else '_' for c in name)[:120]
+              rel = pathlib.PurePosixPath(slug) / 'imports' / f'{mid}_{safe}'
+              target = media_dir / pathlib.Path(*rel.parts)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              print(f'Fetching editor media for {mid}: {absolute}')
+              req = urllib.request.Request(absolute, headers={'User-Agent':'qserve-fablecut-render/1.0'})
+              with urllib.request.urlopen(req, timeout=120) as r, open(target, 'wb') as f:
+                  while True:
+                      b = r.read(1024 * 1024)
+                      if not b: break
+                      f.write(b)
+              item['src'] = '/media/' + rel.as_posix()
+
+          project_path.write_text(json.dumps(project, ensure_ascii=False, indent=2) + '\n')
+          PY
+
+      - name: Start FableCut render server
+        run: |
+          export FABLECUT_DATA_DIR="$GITHUB_WORKSPACE/fablecut-data"
+          export HOST=127.0.0.1
+          export PORT=7777
+          node /tmp/fablecut/server.js >fablecut-data/server.log 2>&1 &
+          echo $! > fablecut-data/server.pid
+          for i in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:7777/api/project >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat fablecut-data/server.log
+          exit 1
+
+      - name: Render with the real FableCut browser compositor
+        run: |
+          NAME="$(python -c "import json; print(json.load(open('fablecut-data/project.json')).get('name',''))")"
+          xvfb-run -a node factory/fablecut_ci_export.mjs \
+            --url http://127.0.0.1:7777 \
+            --exports fablecut-data/exports \
+            --out "output/$SLUG.mp4" \
+            --name "$NAME" \
+            --timeout 1800000
+
+      - name: QA output
+        run: |
+          EXPECTED="$(python - <<'PY'
+          import json
+          p=json.load(open('fablecut-data/project.json'))
+          print(max((float(c.get('start',0))+float(c.get('duration',0)) for c in p.get('clips',[])), default=0))
+          PY
+          )"
+          python factory/qa_video.py "output/$SLUG.mp4" --expected-duration "$EXPECTED" --out-dir "output/qa"
+          cp fablecut-data/project.json "output/$SLUG.project.json"
+          cp fablecut-data/server.log output/fablecut-server.log
+
+      - name: Upload render and QA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fablecut-render-${{ env.SLUG }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
