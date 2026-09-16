@@ -6,6 +6,7 @@
   window.__QSERVE_PROJECT_SLUG__ = slug;
   const nativeFetch = window.fetch.bind(window);
   let lastRevision = 0;
+  let libraryManifest = null;
 
   const projectApi = () => `/api/project?project=${encodeURIComponent(slug)}`;
   const seedUrl = () => `/projects/${encodeURIComponent(slug)}.json`;
@@ -13,6 +14,18 @@
   function withProjectParam(parsed) {
     parsed.searchParams.set('project', slug);
     return parsed.pathname + parsed.search + parsed.hash;
+  }
+
+  async function staticLibrary(dir) {
+    if (!libraryManifest) {
+      const r = await nativeFetch('/library-manifest.json', { cache: 'force-cache' });
+      if (!r.ok) return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
+      libraryManifest = await r.json();
+    }
+    return new Response(JSON.stringify(libraryManifest?.[dir] || []), {
+      status: 200,
+      headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=3600' },
+    });
   }
 
   window.fetch = async (input, init = {}) => {
@@ -57,6 +70,12 @@
     // request too, while preserving keyed /api/media URLs stored in project.json.
     if (parsed.pathname === '/api/media') {
       return nativeFetch(withProjectParam(parsed), init);
+    }
+
+    // Keep FableCut's bundled SFX, elements, animated SVGs and custom fonts on
+    // Pages without needing its Node server just to list static files.
+    if (parsed.pathname === '/api/library') {
+      return staticLibrary(parsed.searchParams.get('dir') || '');
     }
 
     // Final production export is intentionally not a browser/server concern in
