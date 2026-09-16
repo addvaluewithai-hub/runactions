@@ -10,12 +10,19 @@
   const projectApi = () => `/api/project?project=${encodeURIComponent(slug)}`;
   const seedUrl = () => `/projects/${encodeURIComponent(slug)}.json`;
 
-  window.fetch = async (input, init = {}) => {
-    let url = typeof input === 'string' ? input : input?.url;
-    if (!url) return nativeFetch(input, init);
+  function withProjectParam(parsed) {
+    parsed.searchParams.set('project', slug);
+    return parsed.pathname + parsed.search + parsed.hash;
+  }
 
-    const parsed = new URL(url, location.href);
-    if (parsed.origin === location.origin && parsed.pathname === '/api/project') {
+  window.fetch = async (input, init = {}) => {
+    const rawUrl = typeof input === 'string' ? input : input?.url;
+    if (!rawUrl) return nativeFetch(input, init);
+
+    const parsed = new URL(rawUrl, location.href);
+    if (parsed.origin !== location.origin) return nativeFetch(input, init);
+
+    if (parsed.pathname === '/api/project') {
       const method = String(init?.method || (typeof input !== 'string' && input?.method) || 'GET').toUpperCase();
       const response = await nativeFetch(projectApi(), init);
 
@@ -39,11 +46,35 @@
       return response;
     }
 
+    // FableCut sends raw file bodies to /api/upload?name=... when connected.
+    // Scope every upload to this QServe project so Replace Media and drag/drop
+    // survive page refreshes and are available to the later GitHub render.
+    if (parsed.pathname === '/api/upload') {
+      return nativeFetch(withProjectParam(parsed), init);
+    }
+
+    // The stock editor asks /api/media for server media discovery. Scope that
+    // request too, while preserving keyed /api/media URLs stored in project.json.
+    if (parsed.pathname === '/api/media') {
+      return nativeFetch(withProjectParam(parsed), init);
+    }
+
+    // Final production export is intentionally not a browser/server concern in
+    // QServe. FableCut may probe its stock Node ffmpeg endpoint; report it as
+    // unavailable so the UI never implies that Pages is our production renderer.
+    if (parsed.pathname === '/api/export/ffmpeg') {
+      return new Response(JSON.stringify({ available: false }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
     return nativeFetch(input, init);
   };
 
-  // FableCut's stock server uses SSE. Pages persistence is revision-based instead;
-  // poll lightly so an external agent edit can appear without shipping a Node server.
+  // FableCut's stock Node server uses SSE. Pages persistence is revision-based
+  // instead; poll lightly so edits written by an agent can show up without a
+  // permanent Node process.
   async function pollRevision() {
     try {
       const r = await nativeFetch(projectApi(), { cache: 'no-store' });
@@ -59,6 +90,8 @@
   window.addEventListener('DOMContentLoaded', () => {
     document.title = `QServe Studio — ${slug}`;
     const exportBtn = document.getElementById('btnExport');
-    if (exportBtn) exportBtn.title = 'Local browser export. Final QServe render is triggered after you finish editing.';
+    if (exportBtn) {
+      exportBtn.title = 'Preview/local export only. Tell ChatGPT when the edit is final and QServe will render it through GitHub Actions.';
+    }
   });
 })();
