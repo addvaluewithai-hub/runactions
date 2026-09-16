@@ -19,7 +19,12 @@ fs.mkdirSync(path.dirname(output), { recursive: true });
 fs.mkdirSync(exportsDir, { recursive: true });
 const before = new Set(fs.readdirSync(exportsDir));
 
+// Playwright's bundled Linux Chromium intentionally does not ship all proprietary
+// media codecs. QServe source media is H.264/AAC, so CI must drive the system
+// Google Chrome build (channel=chrome) instead. This is the same browser family
+// users run the editor in, but with the codecs required by real MP4 sources.
 const browser = await chromium.launch({
+  channel: 'chrome',
   headless: false,
   args: [
     '--autoplay-policy=no-user-gesture-required',
@@ -62,8 +67,7 @@ async function prewarmMedia() {
       return { ok: false, reason: 'FableCut runtime/project globals unavailable', rows: [] };
     }
 
-    const sleep = ms => new Promise(r => setTimeout(r, ms));
-    const waitEvent = (el, event, timeout = 15000) => new Promise(resolve => {
+    const waitEvent = (el, event, timeout = 8000) => new Promise(resolve => {
       let done = false;
       const finish = value => {
         if (done) return;
@@ -76,7 +80,7 @@ async function prewarmMedia() {
       const timer = setTimeout(() => finish(false), timeout);
       el.addEventListener(event, onEvent, { once: true });
     });
-    const waitPresented = (el, timeout = 3000) => new Promise(resolve => {
+    const waitPresented = (el, timeout = 2500) => new Promise(resolve => {
       if (typeof el.requestVideoFrameCallback !== 'function') {
         resolve(true);
         return;
@@ -109,7 +113,17 @@ async function prewarmMedia() {
       try { el.pause(); } catch {}
       if (el.readyState < 2) {
         try { el.load(); } catch {}
-        await Promise.race([waitEvent(el, 'loadeddata', 20000), sleep(20000)]);
+        await waitEvent(el, 'loadeddata', 8000);
+      }
+      if (el.error || el.readyState < 2) {
+        rows.push({
+          clip: clip.id,
+          src: el.currentSrc || el.src,
+          readyState: el.readyState,
+          error: el.error?.message || el.error?.code || 'media did not load',
+          ok: false,
+        });
+        continue;
       }
 
       const duration = Number.isFinite(el.duration) ? el.duration : 0;
@@ -118,11 +132,11 @@ async function prewarmMedia() {
       let seeked = true;
       if (Math.abs((el.currentTime || 0) - target) > 0.035) {
         seeked = false;
-        const waiter = waitEvent(el, 'seeked', 15000);
+        const waiter = waitEvent(el, 'seeked', 8000);
         try { el.currentTime = target; } catch {}
         seeked = await waiter;
       }
-      const presented = await waitPresented(el, 3000);
+      const presented = seeked ? await waitPresented(el, 2500) : false;
       rows.push({
         clip: clip.id,
         target,
@@ -151,7 +165,20 @@ try {
     { timeout: 120000 },
   );
 
-  await page.waitForTimeout(3000);
+  const browserInfo = await page.evaluate(() => {
+    const v = document.createElement('video');
+    return {
+      ua: navigator.userAgent,
+      h264: v.canPlayType('video/mp4; codecs="avc1.640028"'),
+      aac: v.canPlayType('audio/mp4; codecs="mp4a.40.2"'),
+    };
+  });
+  console.log('[browser-codecs]', JSON.stringify(browserInfo));
+  if (!browserInfo.h264) {
+    throw new Error(`Browser has no H.264 decode support: ${JSON.stringify(browserInfo)}`);
+  }
+
+  await page.waitForTimeout(2500);
   console.log('Project loaded:', await page.locator('#projectName').textContent());
 
   const mediaHealth = await page.evaluate(() => {
