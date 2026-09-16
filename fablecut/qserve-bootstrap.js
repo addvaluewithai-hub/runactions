@@ -66,6 +66,11 @@
       return nativeFetch(withProjectParam(parsed), init);
     }
 
+    // Import-from-URL is also persisted to R2 instead of temporary browser state.
+    if (parsed.pathname === '/api/import-url') {
+      return nativeFetch(withProjectParam(parsed), init);
+    }
+
     // The stock editor asks /api/media for server media discovery. Scope that
     // request too, while preserving keyed /api/media URLs stored in project.json.
     if (parsed.pathname === '/api/media') {
