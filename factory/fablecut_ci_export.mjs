@@ -26,6 +26,10 @@ const browser = await chromium.launch({
     '--disable-dev-shm-usage',
     '--no-sandbox',
     '--use-gl=swiftshader',
+    '--disable-background-media-suspend',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
   ],
 });
 
@@ -52,6 +56,88 @@ page.on('dialog', async dialog => {
   try { await dialog.dismiss(); } catch {}
 });
 
+async function prewarmMedia() {
+  return page.evaluate(async () => {
+    if (typeof runtime === 'undefined' || typeof project === 'undefined') {
+      return { ok: false, reason: 'FableCut runtime/project globals unavailable', rows: [] };
+    }
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const waitEvent = (el, event, timeout = 15000) => new Promise(resolve => {
+      let done = false;
+      const finish = value => {
+        if (done) return;
+        done = true;
+        el.removeEventListener(event, onEvent);
+        clearTimeout(timer);
+        resolve(value);
+      };
+      const onEvent = () => finish(true);
+      const timer = setTimeout(() => finish(false), timeout);
+      el.addEventListener(event, onEvent, { once: true });
+    });
+    const waitPresented = (el, timeout = 3000) => new Promise(resolve => {
+      if (typeof el.requestVideoFrameCallback !== 'function') {
+        resolve(true);
+        return;
+      }
+      let done = false;
+      const timer = setTimeout(() => {
+        if (!done) { done = true; resolve(false); }
+      }, timeout);
+      el.requestVideoFrameCallback(() => {
+        if (!done) {
+          done = true;
+          clearTimeout(timer);
+          resolve(true);
+        }
+      });
+    });
+
+    const rows = [];
+    const clips = project.clips || [];
+    for (const clip of clips) {
+      if (clip.kind !== 'video') continue;
+      const el = runtime.clipEls.get(clip.id);
+      if (!(el instanceof HTMLVideoElement)) {
+        rows.push({ clip: clip.id, ok: false, reason: 'no video element' });
+        continue;
+      }
+
+      el.preload = 'auto';
+      el.muted = true;
+      try { el.pause(); } catch {}
+      if (el.readyState < 2) {
+        try { el.load(); } catch {}
+        await Promise.race([waitEvent(el, 'loadeddata', 20000), sleep(20000)]);
+      }
+
+      const duration = Number.isFinite(el.duration) ? el.duration : 0;
+      const requested = Math.max(0, Number(clip.in) || 0);
+      const target = duration > 0 ? Math.min(requested, Math.max(0, duration - 0.05)) : requested;
+      let seeked = true;
+      if (Math.abs((el.currentTime || 0) - target) > 0.035) {
+        seeked = false;
+        const waiter = waitEvent(el, 'seeked', 15000);
+        try { el.currentTime = target; } catch {}
+        seeked = await waiter;
+      }
+      const presented = await waitPresented(el, 3000);
+      rows.push({
+        clip: clip.id,
+        target,
+        readyState: el.readyState,
+        seeked,
+        presented,
+        currentTime: el.currentTime,
+        src: el.currentSrc || el.src,
+        ok: el.readyState >= 2 && seeked,
+      });
+    }
+    return { ok: rows.every(r => r.ok), rows };
+  });
+}
+
 try {
   console.log(`Opening ${url}`);
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 });
@@ -65,22 +151,28 @@ try {
     { timeout: 120000 },
   );
 
-  // Give video/image metadata a moment to settle before composition begins.
   await page.waitForTimeout(3000);
   console.log('Project loaded:', await page.locator('#projectName').textContent());
 
-  // Surface clips whose browser media element did not load. FableCut can show a
-  // placeholder in preview, but production render must fail loudly instead.
   const mediaHealth = await page.evaluate(() => {
     const bad = [];
-    for (const [id, el] of (window.runtime?.clipEls || new Map())) {
+    if (typeof runtime === 'undefined') return [{ id: '__runtime__', error: 'runtime unavailable' }];
+    for (const [id, el] of runtime.clipEls) {
       if (el instanceof HTMLMediaElement && (el.error || el.readyState === 0)) {
         bad.push({ id, src: el.currentSrc || el.src, readyState: el.readyState, error: el.error?.message || el.error?.code || null });
       }
     }
     return bad;
-  }).catch(() => []);
+  }).catch(err => [{ id: '__health__', error: String(err) }]);
   if (mediaHealth.length) console.error('[media-health]', JSON.stringify(mediaHealth));
+
+  console.log('Prewarming video decoders at each clip source-in...');
+  const prewarm = await prewarmMedia();
+  console.log('[media-prewarm]', JSON.stringify(prewarm));
+  if (!prewarm.ok) {
+    const failed = prewarm.rows?.filter(r => !r.ok) || [];
+    throw new Error(`Media prewarm failed: ${JSON.stringify(failed)}`);
+  }
 
   await page.click('#btnExport');
   await page.waitForFunction(() => !document.getElementById('exportSetup')?.classList.contains('hidden'), null, { timeout: 30000 });
@@ -121,8 +213,6 @@ try {
     throw new Error(dialogs.filter(x => /Export failed:/i.test(x)).join(' | '));
   }
 
-  // The stock server writes the finished export to DATA_DIR/exports. Wait until
-  // a new non-part file appears and its size is stable before copying it.
   let candidate = null;
   let stable = 0;
   let lastSize = -1;
