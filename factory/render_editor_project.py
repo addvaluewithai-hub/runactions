@@ -67,6 +67,21 @@ def asset_path(root,work,slug,aid,media):
 def esc_text(s):
     return str(s).replace('\\','\\\\').replace(':','\\:').replace("'","\\'").replace('%','\\%')
 
+def percent_crop_filter(clip):
+    cr=clip.get('crop') or {}
+    if cr.get('unit')!='percent': return ''
+    left=max(0,min(49,float(cr.get('left',0) or 0)));right=max(0,min(49,float(cr.get('right',0) or 0)))
+    top=max(0,min(49,float(cr.get('top',0) or 0)));bottom=max(0,min(49,float(cr.get('bottom',0) or 0)))
+    if left+right+top+bottom<.001:return ''
+    kw=max(.02,1-(left+right)/100);kh=max(.02,1-(top+bottom)/100)
+    return f',crop=trunc(iw*{kw:.6f}/2)*2:trunc(ih*{kh:.6f}/2)*2:iw*{left/100:.6f}:ih*{top/100:.6f}'
+
+def rounded_alpha(radius):
+    r=max(1,int(round(float(radius))))
+    # Distance-to-nearest-corner alpha mask. Applied after any border paint so
+    # the border and video share the same rounded outer silhouette.
+    return f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lt(pow(max({r}-min(X,W-1-X),0),2)+pow(max({r}-min(Y,H-1-Y),0),2),pow({r},2)),255,0)'"
+
 def apply_layers(base,p,root,work,slug,out):
     W=int(p['canvas']['width']);H=int(p['canvas']['height']);fps=int(p.get('fps',30));media=p['media']; total=float(p['duration'])
     extra=[]
@@ -88,10 +103,18 @@ def apply_layers(base,p,root,work,slug,out):
         raw=f'r{layer_n}'; chain=f'[{input_idx}:v]setpts=PTS-STARTPTS+{s:.3f}/TB,fps={fps}'
         if aid=='product':
             cr=a.get('crop',{});top=int(cr.get('top',110));bot=int(cr.get('bottom',100));chain+=f',crop=iw:ih-{top+bot}:0:{top}'
-        fit=c.get('fit','cover')
-        if fit=='contain':chain+=f',scale={tw}:{th}:force_original_aspect_ratio=decrease,pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2:color=black@0,format=rgba'
+        else:
+            chain+=percent_crop_filter(c)
+        fit=c.get('fit','cover'); radius=max(0,float(l.get('radius',0) or 0)); bd=max(0,int(l.get('border',0) or 0))
+        # Rounded clips are frame elements (PiP), so fill the requested box after
+        # FableCut crop instead of reintroducing transparent letterboxing.
+        if fit=='contain' and radius>0:chain+=f',scale={tw}:{th}:force_original_aspect_ratio=increase,crop={tw}:{th},format=rgba'
+        elif fit=='contain':chain+=f',scale={tw}:{th}:force_original_aspect_ratio=decrease,pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2:color=black@0,format=rgba'
         elif fit=='fill':chain+=f',scale={tw}:{th},format=rgba'
         else:chain+=f',scale={tw}:{th}:force_original_aspect_ratio=increase,crop={tw}:{th},format=rgba'
+        if radius>0:
+            if bd>0: chain+=f",drawbox=x=0:y=0:w=iw:h=ih:color={c.get('borderColor','#ffffff')}:t={bd}"
+            chain+=','+rounded_alpha(min(radius,min(tw,th)/2))
         op=max(0,min(1,float(c.get('opacity',1))));chain+=f',colorchannelmixer=aa={op:.3f}'
         td=max(.05,float(c.get('transitionDuration',.35)))
         if c.get('transitionIn')=='fade':chain+=f',fade=t=in:st=0:d={min(td,d):.3f}:alpha=1'
@@ -100,8 +123,9 @@ def apply_layers(base,p,root,work,slug,out):
         if abs(scale-1)>.001: chain+=f',scale=iw*{scale:.4f}:ih*{scale:.4f}'
         if abs(rot)>.01: chain+=f',rotate={rot}*PI/180:ow=rotw(iw):oh=roth(ih):c=none'
         chain+=f'[{raw}]';filters.append(chain);nxt=f'c{layer_n}';filters.append(f"[{cur}][{raw}]overlay={x}:{y}:eof_action=pass:shortest=0:enable='{en}'[{nxt}]");cur=nxt;layer_n+=1;input_idx+=1
-        bd=int(l.get('border',0))
-        if bd>0:
+        # Non-rounded legacy overlays keep their rectangular border. Rounded
+        # overlays paint the border before the alpha mask above.
+        if bd>0 and radius<=0:
             nxt=f'cb{layer_n}'; filters.append(f"[{cur}]drawbox=x={x}:y={y}:w={tw}:h={th}:color={c.get('borderColor','#ffffff')}:t={bd}:enable='{en}'[{nxt}]");cur=nxt;layer_n+=1
     filters.append(f'[{cur}]format=yuv420p[v]');cmd+=['-filter_complex',';'.join(filters),'-map','[v]','-an','-t',f'{total:.3f}','-c:v','libx264','-preset','veryfast','-crf','19','-pix_fmt','yuv420p',out];run(cmd)
 
