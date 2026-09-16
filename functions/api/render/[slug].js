@@ -14,8 +14,14 @@ export async function onRequestPost({ request, params, env }) {
   if (!slug) return json({ error: 'invalid slug' }, 400);
   if (!env.EDITOR_KEY || request.headers.get('X-Editor-Key') !== env.EDITOR_KEY) return json({ error: 'unauthorized' }, 401);
   if (!env.GITHUB_TOKEN) return json({ error: 'GITHUB_TOKEN is not configured' }, 503);
+
   const repo = env.GITHUB_REPO || DEFAULT_REPO;
-  const workflow = env.RENDER_WORKFLOW || 'render-editor-project.yml';
+  const workflow = env.RENDER_WORKFLOW || 'render-fablecut.yml';
+  const origin = new URL(request.url).origin;
+  // The Actions job downloads the exact revision currently stored by the
+  // FableCut editor, so a render is never silently based on the repository seed.
+  const projectUrl = `${origin}/api/project?project=${encodeURIComponent(slug)}`;
+
   const r = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${workflow}/dispatches`, {
     method: 'POST',
     headers: {
@@ -25,8 +31,11 @@ export async function onRequestPost({ request, params, env }) {
       'Content-Type': 'application/json',
       'User-Agent': 'qserve-video-editor',
     },
-    body: JSON.stringify({ ref: env.GITHUB_BRANCH || 'main', inputs: { slug } }),
+    body: JSON.stringify({
+      ref: env.GITHUB_BRANCH || 'main',
+      inputs: { slug, project_url: projectUrl },
+    }),
   });
   if (!r.ok) return json({ error: await r.text() }, r.status);
-  return json({ ok: true, message: `GitHub render queued for ${slug}` }, 202);
+  return json({ ok: true, slug, projectUrl, message: `FableCut production render queued for ${slug}` }, 202);
 }
