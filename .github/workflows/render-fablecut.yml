@@ -21,7 +21,7 @@ jobs:
   render:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[render-fablecut]')
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -50,39 +50,16 @@ jobs:
         with:
           python-version: '3.12'
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install render dependencies
+      - name: Install production render dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg xvfb
-          if ! command -v google-chrome >/dev/null 2>&1; then
-            sudo apt-get install -y google-chrome-stable
-          fi
-          google-chrome --version
+          sudo apt-get install -y ffmpeg
           python -m pip install --upgrade gdown pillow
-          npm install --no-save playwright@1.55.0
-          # We drive the system Chrome channel for H.264/AAC support; install
-          # browser dependencies only, not Playwright's codec-limited Chromium.
-          npx playwright install-deps chromium
 
-      - name: Fetch pinned FableCut
+      - name: Fetch latest saved FableCut timeline
         run: |
-          COMMIT="$(python -c "import json; print(json.load(open('fablecut/projects/$SLUG/manifest.json'))['fablecutCommit'])")"
-          git clone --quiet --no-checkout https://github.com/ronak-create/FableCut.git /tmp/fablecut
-          git -C /tmp/fablecut checkout --quiet "$COMMIT"
-          echo "FABLECUT_COMMIT=$COMMIT" >> "$GITHUB_ENV"
-
-      - name: Patch FableCut seek timing for CI
-        run: |
-          python factory/patch_fablecut_ci.py /tmp/fablecut/app.js --timeout-ms 750 --attempts 6
-
-      - name: Fetch latest saved timeline
-        run: |
-          rm -rf fablecut-data output
-          mkdir -p fablecut-data/media fablecut-data/exports output
+          rm -rf fablecut-data work output
+          mkdir -p fablecut-data/media work output
           if [ -n "$PROJECT_URL" ]; then
             echo "Fetching saved editor timeline from $PROJECT_URL"
             curl --fail --location --retry 3 --header 'Cache-Control: no-cache' "$PROJECT_URL" -o fablecut-data/project.json
@@ -138,56 +115,69 @@ jobs:
           project_path.write_text(json.dumps(project, ensure_ascii=False, indent=2) + '\n')
           PY
 
-      - name: Normalize video media for frame-accurate CI seeking
+      - name: Normalize timeline video sources
         run: |
           python factory/normalize_fablecut_media.py \
             --project fablecut-data/project.json \
             --data-dir fablecut-data
 
-      - name: Start FableCut render server
+      - name: Bridge FableCut media into QServe render workspace
         run: |
-          export FABLECUT_DATA_DIR="$GITHUB_WORKSPACE/fablecut-data"
-          export HOST=127.0.0.1
-          export PORT=7777
-          node /tmp/fablecut/server.js >fablecut-data/server.log 2>&1 &
-          echo $! > fablecut-data/server.pid
-          for i in $(seq 1 60); do
-            if curl --silent --fail http://127.0.0.1:7777/api/project >/dev/null; then exit 0; fi
-            sleep 1
-          done
-          cat fablecut-data/server.log
-          exit 1
+          python - <<'PY'
+          import json, pathlib, shutil
 
-      - name: Render with the real FableCut browser compositor
-        run: |
-          NAME="$(python -c "import json; print(json.load(open('fablecut-data/project.json')).get('name',''))")"
-          render_once() {
-            xvfb-run -a node factory/fablecut_ci_export.mjs \
-              --url http://127.0.0.1:7777 \
-              --exports fablecut-data/exports \
-              --out "output/$SLUG.mp4" \
-              --name "$NAME" \
-              --timeout 1800000
+          p = json.load(open('fablecut-data/project.json'))
+          by_id = {m['id']: m for m in p.get('media', [])}
+          fixed = {
+              'm_presenter': 'presenter.mp4',
+              'm_product': 'product.mp4',
+              'm_qr': 'qr.jpg',
+              'm_mockup': 'mockup.jpg',
           }
+          for mid, out_name in fixed.items():
+              item = by_id[mid]
+              src = pathlib.Path('fablecut-data') / str(item['src']).lstrip('/')
+              dst = pathlib.Path('work') / out_name
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(src, dst)
+              print(f'{mid}: {src} -> {dst}')
 
-          set +e
-          render_once
-          STATUS=$?
-          set -e
-          if [ "$STATUS" -ne 0 ]; then
-            echo "First browser export failed; cleaning partial encoder state and retrying once with warm OS/browser caches."
-            pkill -f '[f]fmpeg.*fablecut-data' || true
-            rm -f fablecut-data/exports/* output/$SLUG.mp4
-            sleep 2
-            render_once
-          fi
+          # The proven renderer resolves non-core /media paths below editor/.
+          # Mirror downloaded FableCut stills there at runtime, without committing binaries.
+          for item in p.get('media', []):
+              if item['id'] in fixed:
+                  continue
+              src_url = str(item.get('src') or '')
+              if not src_url.startswith('/media/'):
+                  continue
+              src = pathlib.Path('fablecut-data') / src_url.lstrip('/')
+              dst = pathlib.Path('editor') / src_url.lstrip('/')
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(src, dst)
+              print(f"{item['id']}: {src} -> {dst}")
+          PY
+
+      - name: Convert FableCut timeline to production render plan
+        run: |
+          python factory/fablecut_to_editor.py \
+            --project fablecut-data/project.json \
+            --slug "$SLUG" \
+            --out work/render-plan.json
+          python -m json.tool work/render-plan.json >/dev/null
+
+      - name: Render FableCut timeline with QServe FFmpeg renderer
+        run: |
+          python factory/render_editor_project.py \
+            --project work/render-plan.json \
+            --work work \
+            --out "output/$SLUG.mp4"
 
       - name: QA output
         run: |
           EXPECTED="$(python - <<'PY'
           import json
-          p=json.load(open('fablecut-data/project.json'))
-          print(max((float(c.get('start',0))+float(c.get('duration',0)) for c in p.get('clips',[])), default=0))
+          p=json.load(open('work/render-plan.json'))
+          print(float(p['duration']))
           PY
           )"
           python factory/qa_video.py "output/$SLUG.mp4" --expected-duration "$EXPECTED" --out-dir "output/qa"
@@ -196,8 +186,8 @@ jobs:
         if: always()
         run: |
           mkdir -p output
-          cp fablecut-data/project.json "output/$SLUG.project.json" 2>/dev/null || true
-          cp fablecut-data/server.log output/fablecut-server.log 2>/dev/null || true
+          cp fablecut-data/project.json "output/$SLUG.fablecut-project.json" 2>/dev/null || true
+          cp work/render-plan.json "output/$SLUG.render-plan.json" 2>/dev/null || true
 
       - name: Upload render and QA
         if: always()
