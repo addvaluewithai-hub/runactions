@@ -30,8 +30,27 @@ const browser = await chromium.launch({
 });
 
 const page = await browser.newPage({ viewport: { width: 1600, height: 1100 }, acceptDownloads: true });
+const dialogs = [];
+const failedResponses = [];
 page.on('console', msg => console.log(`[browser:${msg.type()}] ${msg.text()}`));
 page.on('pageerror', err => console.error(`[browser:error] ${err.stack || err.message}`));
+page.on('requestfailed', req => {
+  const failure = req.failure()?.errorText || 'request failed';
+  console.error(`[network:failed] ${req.method()} ${req.url()} — ${failure}`);
+});
+page.on('response', res => {
+  if (res.status() >= 400) {
+    const row = `${res.status()} ${res.request().method()} ${res.url()}`;
+    failedResponses.push(row);
+    console.error(`[network:http] ${row}`);
+  }
+});
+page.on('dialog', async dialog => {
+  const row = `${dialog.type()}: ${dialog.message()}`;
+  dialogs.push(row);
+  console.error(`[browser:dialog] ${row}`);
+  try { await dialog.dismiss(); } catch {}
+});
 
 try {
   console.log(`Opening ${url}`);
@@ -50,6 +69,19 @@ try {
   await page.waitForTimeout(3000);
   console.log('Project loaded:', await page.locator('#projectName').textContent());
 
+  // Surface clips whose browser media element did not load. FableCut can show a
+  // placeholder in preview, but production render must fail loudly instead.
+  const mediaHealth = await page.evaluate(() => {
+    const bad = [];
+    for (const [id, el] of (window.runtime?.clipEls || new Map())) {
+      if (el instanceof HTMLMediaElement && (el.error || el.readyState === 0)) {
+        bad.push({ id, src: el.currentSrc || el.src, readyState: el.readyState, error: el.error?.message || el.error?.code || null });
+      }
+    }
+    return bad;
+  }).catch(() => []);
+  if (mediaHealth.length) console.error('[media-health]', JSON.stringify(mediaHealth));
+
   await page.click('#btnExport');
   await page.waitForFunction(() => !document.getElementById('exportSetup')?.classList.contains('hidden'), null, { timeout: 30000 });
 
@@ -63,19 +95,31 @@ try {
 
   const started = Date.now();
   let lastPct = '';
+  let lastTitle = '';
   while (Date.now() - started < timeoutMs) {
-    const hidden = await page.locator('#exportOverlay').evaluate(el => el.classList.contains('hidden'));
-    const pct = await page.locator('#exportProgress').evaluate(el => el.style.width || '');
-    if (pct && pct !== lastPct) {
-      console.log(`Export progress ${pct}`);
-      lastPct = pct;
+    const state = await page.evaluate(() => ({
+      hidden: document.getElementById('exportOverlay')?.classList.contains('hidden'),
+      pct: document.getElementById('exportProgress')?.style.width || '',
+      title: document.getElementById('exportTitle')?.textContent || '',
+      note: document.getElementById('exportNote')?.textContent || '',
+    }));
+    if (state.title !== lastTitle) {
+      console.log(`Export state: ${state.title}${state.note ? ` — ${state.note}` : ''}`);
+      lastTitle = state.title;
     }
-    if (hidden) break;
-    await page.waitForTimeout(2000);
+    if (state.pct && state.pct !== lastPct) {
+      console.log(`Export progress ${state.pct}`);
+      lastPct = state.pct;
+    }
+    if (state.hidden) break;
+    await page.waitForTimeout(1000);
   }
 
   const stillOpen = await page.locator('#exportOverlay').evaluate(el => !el.classList.contains('hidden'));
   if (stillOpen) throw new Error(`FableCut export timed out after ${Math.round(timeoutMs / 60000)} minutes`);
+  if (dialogs.some(x => /Export failed:/i.test(x))) {
+    throw new Error(dialogs.filter(x => /Export failed:/i.test(x)).join(' | '));
+  }
 
   // The stock server writes the finished export to DATA_DIR/exports. Wait until
   // a new non-part file appears and its size is stable before copying it.
@@ -97,7 +141,15 @@ try {
     }
     await new Promise(r => setTimeout(r, 1000));
   }
-  if (!candidate) throw new Error(`No finished FableCut export appeared in ${exportsDir}`);
+  if (!candidate) {
+    const detail = [
+      dialogs.length ? `dialogs=${dialogs.join(' | ')}` : '',
+      failedResponses.length ? `http=${failedResponses.slice(-12).join(' | ')}` : '',
+      `lastProgress=${lastPct || 'n/a'}`,
+      `lastTitle=${lastTitle || 'n/a'}`,
+    ].filter(Boolean).join('; ');
+    throw new Error(`No finished FableCut export appeared in ${exportsDir}${detail ? `; ${detail}` : ''}`);
+  }
 
   fs.copyFileSync(candidate.path, output);
   console.log(`Copied ${candidate.path} -> ${output} (${fs.statSync(output).size} bytes)`);
