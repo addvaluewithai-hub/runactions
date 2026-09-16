@@ -1,0 +1,15 @@
+{
+  "slug": "rooftop-7000",
+  "fablecutCommit": "21ec62f5c1599667d632b78b39e8191ba14f71d9",
+  "timelineSeed": "fablecut/projects/rooftop-7000/project.json",
+  "media": {
+    "m_presenter": {"filename": "rooftop-7000/presenter.mp4", "driveId": "1uGzt-Wj18sy4H2CISUCVWpR7mC1OBMkn", "preview": "editor/media/rooftop-7000/presenter_proxy.mp4"},
+    "m_product": {"filename": "rooftop-7000/product.mp4", "driveId": "1P_hd1WID6X66cem9vmh84DgAYBYSsf37", "preview": "editor/media/rooftop-7000/product_proxy.mp4"},
+    "m_qr": {"filename": "rooftop-7000/qr.jpg", "driveId": "1rDjrBAmTuqEHvsa_anmXXqKZRXu5862N", "preview": "editor/media/rooftop-7000/qr.jpg"},
+    "m_mockup": {"filename": "rooftop-7000/mockup.jpg", "driveId": "1MMnUi230vZGUITj9uW1FAjX0ZmFN1MwP", "preview": "editor/media/rooftop-7000/mockup.jpg"},
+    "m_dashboard_menu": {"filename": "rooftop-7000/dashboard_menu.jpg", "driveId": "1tEUxPeNHVQQ698G3vnSBzAP17DiKeSSc", "preview": "editor/media/rooftop-7000/dashboard_menu.jpg"},
+    "m_dashboard_services": {"filename": "rooftop-7000/dashboard_services.jpg", "driveId": "1sX-nXHn6shXA4jyzmBrSqKFHf0kkWRT2", "preview": "editor/media/rooftop-7000/dashboard_services.jpg"},
+    "m_dashboard_requests": {"filename": "rooftop-7000/dashboard_requests.jpg", "driveId": "1cvjaZZDpKwFqwfdVVe6Ti3YW2Dt3eDn_", "preview": "editor/media/rooftop-7000/dashboard_requests.jpg"},
+    "m_dashboard_performance": {"filename": "rooftop-7000/dashboard_performance.jpg", "driveId": "1v6v5vlOH41tYYpU_w_jpQUcwQt31SCXw", "preview": "editor/media/rooftop-7000/dashboard_performance.jpg"}
+  }
+}
