@@ -58,9 +58,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg xvfb
+          if ! command -v google-chrome >/dev/null 2>&1; then
+            sudo apt-get install -y google-chrome-stable
+          fi
+          google-chrome --version
           python -m pip install --upgrade gdown pillow
           npm install --no-save playwright@1.55.0
-          npx playwright install --with-deps chromium
+          # We drive the system Chrome channel for H.264/AAC support; install
+          # browser dependencies only, not Playwright's codec-limited Chromium.
+          npx playwright install-deps chromium
 
       - name: Fetch pinned FableCut
         run: |
@@ -105,7 +111,6 @@ jobs:
               src = str(item.get('src') or '')
               meta = known.get(mid)
               if meta and meta.get('driveId'):
-                  # FableCut's stock /media route is flat, so keep production names flat.
                   filename = pathlib.PurePosixPath(meta['filename']).name
                   target = media_dir / filename
                   print(f'Downloading production original for {mid} -> {target}')
@@ -113,7 +118,6 @@ jobs:
                   item['src'] = '/media/' + filename
                   continue
 
-              # User-imported media is fetched from the editor origin when possible.
               if not project_url:
                   raise SystemExit(f'Unknown media {mid} ({src}) and no project_url was supplied')
               absolute = urllib.parse.urljoin(project_url, src)
