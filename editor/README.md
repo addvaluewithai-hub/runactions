@@ -1,54 +1,59 @@
-# QServe Video Editor
+# QServe FableCut Studio
 
-A lightweight collaborative multitrack editor for the personalized QServe sales-video factory.
+QServe uses **FableCut for browser editing**, **Cloudflare Pages + Pages Functions + R2 for editor persistence**, and **GitHub Actions for production rendering + QA**.
 
-## Deploy on Cloudflare Pages
+There is intentionally **no GitHub token in Cloudflare**. When the edit is final, ask ChatGPT to render the saved project; ChatGPT triggers the GitHub workflow using the connected GitHub app.
 
-Connect this repository to Cloudflare Pages and use:
+## Cloudflare Pages deployment
 
-- **Production branch:** `main`
-- **Build command:** leave empty
-- **Build output directory:** `editor`
+Connect `addvaluewithai-hub/runactions` to Cloudflare Pages with:
 
-Pages Functions live in the repository-level `functions/` directory and provide project save + render actions.
+- Production branch: `main`
+- Root directory: repository root
+- Build command: `bash scripts/build-fablecut-pages.sh`
+- Build output directory: `dist`
 
-### Required Cloudflare environment variables / secrets
+The build fetches the pinned FableCut commit, injects the QServe Pages bridge before `app.js`, copies the Rooftop seed timeline, built-in FableCut libraries, and lightweight browser proxy media.
 
-- `EDITOR_KEY` — private password used by the editor for write/render actions.
-- `GITHUB_TOKEN` — GitHub token with **Contents: Read/Write** and **Actions: Read/Write** on `addvaluewithai-hub/runactions`.
-
-Optional:
-
-- `GITHUB_REPO=addvaluewithai-hub/runactions`
-- `GITHUB_BRANCH=main`
-- `RENDER_WORKFLOW=render-editor-project.yml`
-
-Never put the GitHub token in browser JavaScript. It stays inside the Cloudflare Function.
-
-Open Rooftop with:
+Open Rooftop after deploy with:
 
 `/?project=rooftop-7000`
 
-## Current editor controls
+## Required R2 binding
 
-The editor now exposes the broader editing surface so we can evaluate whether this custom product is enough for QServe:
+Create one R2 bucket (for example `qserve-video-editor`) and bind it to the Pages project as:
 
-- multitrack timeline: main video, two overlay tracks, presenter track, graphics/highlights track
-- drag clips horizontally and trim both edges
-- split clip at playhead
-- duration/start/end and source in/out editing
-- scene library with approved product/dashboard shots and one-click scene replacement
-- insert a scene as an overlay instead of replacing the main scene
-- add independent presenter clips anywhere on the timeline
-- add text overlays and highlight boxes
-- move a clip between tracks
-- transform controls: X/Y, width/height, scale, rotation, opacity, radius and border
-- cover / contain / fill modes
-- fade and zoom transition controls in preview; fade transitions are rendered server-side
-- magnetic main-track cut editing, snapping and safe-area overlay
-- global presenter position/size/radius preset
-- undo / redo, local drafts, reset, JSON import/export
-- Save publishes the shared project JSON back to GitHub
-- Render dispatches the deterministic GitHub Actions renderer
+`QSERVE_PROJECTS`
 
-The final renderer supports main-scene edits plus multitrack image/video/presenter overlays, text, highlight boxes, transforms, opacity, borders and fades. The editor remains intentionally narrower than Premiere/CapCut: it is optimized for this repeatable sales-video format rather than becoming a general NLE.
+The Pages Functions use that binding for:
+
+- `projects/<slug>/project.json` — latest shared FableCut project revision
+- `media/<slug>/...` — media imported/replaced from the browser
+
+No GitHub secret is required by Cloudflare.
+
+## Security
+
+The write APIs are same-origin only, but the editor should still be private. Protect the Pages site with **Cloudflare Access** before using it with production projects.
+
+## Browser / render workflow
+
+1. Edit in FableCut on Pages.
+2. FableCut saves the project through `PUT /api/project?project=<slug>` to R2 with revision conflict protection.
+3. Imported/replaced media is uploaded to R2 through `/api/upload` or `/api/import-url`.
+4. When the edit is final, tell ChatGPT: `Render rooftop-7000`.
+5. ChatGPT triggers `.github/workflows/render-fablecut.yml` and supplies the saved Cloudflare project URL.
+6. GitHub Actions downloads production originals for known QServe assets, fetches user-imported media from the editor origin, converts the FableCut timeline to the QServe production plan, renders, runs QA, and uploads the final artifact.
+
+## Local build smoke test
+
+```bash
+bash scripts/build-fablecut-pages.sh
+npx wrangler pages dev dist --r2=QSERVE_PROJECTS
+```
+
+Without Wrangler/R2, you can still inspect the generated static FableCut bundle under `dist/`, but shared save/upload requires the R2 binding.
+
+## Current Rooftop seed
+
+The seed project is `fablecut/projects/rooftop-7000/project.json`. Browser preview uses lightweight proxies; production rendering resolves the known presenter/product/QR/mockup assets through `fablecut/projects/rooftop-7000/manifest.json`.
