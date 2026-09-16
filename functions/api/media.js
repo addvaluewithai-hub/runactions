@@ -43,8 +43,32 @@ export async function onRequest({ request, env }) {
 
   const url = new URL(request.url);
   const slug = safeSlug(url.searchParams.get('project'));
-  const name = safeObjectName(url.searchParams.get('key'));
-  if (!slug || !name) return json({ error: 'invalid media request' }, 400);
+  if (!slug) return json({ error: 'invalid media request' }, 400);
+
+  const rawName = url.searchParams.get('key');
+  if (!rawName) {
+    if (request.method === 'HEAD') return new Response(null, { status: 200, headers: { 'cache-control': 'no-store' } });
+    const prefix = `media/${slug}/`;
+    const items = [];
+    let cursor;
+    do {
+      const page = await env.QSERVE_PROJECTS.list({ prefix, cursor, limit: 1000 });
+      for (const object of page.objects) {
+        const name = object.key.slice(prefix.length);
+        if (!name || name.includes('/')) continue;
+        items.push({
+          name: object.customMetadata?.originalName || name.replace(/^[0-9a-f-]{36}-/i, ''),
+          src: `/api/media?project=${encodeURIComponent(slug)}&key=${encodeURIComponent(name)}`,
+          size: Number(object.size || 0),
+        });
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    return json(items);
+  }
+
+  const name = safeObjectName(rawName);
+  if (!name) return json({ error: 'invalid media request' }, 400);
 
   const key = `media/${slug}/${name}`;
   const head = await env.QSERVE_PROJECTS.head(key);
