@@ -1,0 +1,50 @@
+{
+  "name": "Rooftop 7000 × QServe — FableCut Master",
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "background": "#f4f0e7",
+  "revision": 1,
+  "panSchema": 1,
+  "tracks": [
+    {"id": "V4", "kind": "video"},
+    {"id": "V3", "kind": "video"},
+    {"id": "V2", "kind": "video"},
+    {"id": "V1", "kind": "video"},
+    {"id": "A1", "kind": "audio"}
+  ],
+  "media": [
+    {"id": "m_presenter", "name": "Presenter", "kind": "video", "src": "/media/rooftop-7000/presenter.mp4", "duration": 99.715, "width": 1080, "height": 1920},
+    {"id": "m_product", "name": "QServe guest app recording", "kind": "video", "src": "/media/rooftop-7000/product.mp4", "duration": 217.405, "width": 574, "height": 1280},
+    {"id": "m_qr", "name": "Rooftop 7000 QR", "kind": "image", "src": "/media/rooftop-7000/qr.jpg", "width": 1122, "height": 1402},
+    {"id": "m_mockup", "name": "Rooftop 7000 personalized app", "kind": "image", "src": "/media/rooftop-7000/mockup.jpg", "width": 941, "height": 1672},
+    {"id": "m_dashboard_menu", "name": "Dashboard — Menu", "kind": "image", "src": "/media/rooftop-7000/dashboard_menu.jpg"},
+    {"id": "m_dashboard_services", "name": "Dashboard — Services", "kind": "image", "src": "/media/rooftop-7000/dashboard_services.jpg"},
+    {"id": "m_dashboard_requests", "name": "Dashboard — Requests", "kind": "image", "src": "/media/rooftop-7000/dashboard_requests.jpg"},
+    {"id": "m_dashboard_performance", "name": "Dashboard — Performance", "kind": "image", "src": "/media/rooftop-7000/dashboard_performance.jpg"}
+  ],
+  "clips": [
+    {
+      "id": "c_qr", "mediaId": "m_qr", "kind": "image", "track": "V1", "start": 0, "in": 0, "duration": 4,
+      "name": "Personalized QR opener", "props": {"fit": "cover"},
+      "keyframes": {"scale": [{"t": 0, "v": 1.0}, {"t": 4, "v": 1.06, "ease": "linear"}]}
+    },
+    {"id": "c_presenter_intro", "mediaId": "m_presenter", "kind": "video", "track": "V1", "start": 4, "in": 4, "duration": 14.4, "name": "Presenter intro", "props": {"fit": "cover", "volume": 0}},
+    {"id": "c_menu", "mediaId": "m_product", "kind": "video", "track": "V1", "start": 18.4, "in": 42, "duration": 12, "name": "Menu — loaded food images", "props": {"fit": "contain", "cropT": 10.94, "cropB": 5.0, "volume": 0}},
+    {"id": "c_call_waiter", "mediaId": "m_product", "kind": "video", "track": "V1", "start": 30.4, "in": 164, "duration": 8.6, "name": "Call waiter flow", "props": {"fit": "contain", "cropT": 10.94, "cropB": 5.0, "volume": 0}},
+    {"id": "c_waiter_received", "mediaId": "m_product", "kind": "video", "track": "V1", "start": 39, "in": 170.2, "duration": 8.2, "name": "Waiter receives request", "props": {"fit": "contain", "cropT": 10.94, "cropB": 5.0, "volume": 0}},
+    {"id": "c_dashboard_menu", "mediaId": "m_dashboard_menu", "kind": "image", "track": "V1", "start": 47.2, "in": 0, "duration": 10.2, "name": "Dashboard — menu control", "props": {"fit": "cover", "scale": 1.18, "x": -380}},
+    {"id": "c_dashboard_services", "mediaId": "m_dashboard_services", "kind": "image", "track": "V1", "start": 57.4, "in": 0, "duration": 9.6, "name": "Dashboard — service rules", "props": {"fit": "cover", "scale": 1.12}},
+    {"id": "c_feedback", "mediaId": "m_product", "kind": "video", "track": "V1", "start": 67, "in": 203, "duration": 9, "name": "Feedback + Google review", "props": {"fit": "contain", "cropT": 10.94, "cropB": 5.0, "volume": 0}},
+    {"id": "c_requests", "mediaId": "m_dashboard_requests", "kind": "image", "track": "V1", "start": 76, "in": 0, "duration": 6.4, "name": "Dashboard — live requests", "props": {"fit": "cover", "scale": 1.12}},
+    {"id": "c_performance", "mediaId": "m_dashboard_performance", "kind": "image", "track": "V1", "start": 82.4, "in": 0, "duration": 3.6, "name": "Dashboard — performance", "props": {"fit": "cover", "scale": 1.12, "y": 120}},
+    {
+      "id": "c_mockup", "mediaId": "m_mockup", "kind": "image", "track": "V1", "start": 86, "in": 0, "duration": 8,
+      "name": "Rooftop personalized concept", "props": {"fit": "cover"},
+      "keyframes": {"scale": [{"t": 0, "v": 1.0}, {"t": 8, "v": 1.055, "ease": "linear"}]}
+    },
+    {"id": "c_presenter_cta", "mediaId": "m_presenter", "kind": "video", "track": "V1", "start": 94, "in": 94, "duration": 5.7, "name": "Presenter CTA", "props": {"fit": "cover", "volume": 0}},
+    {"id": "c_presenter_pip", "mediaId": "m_presenter", "kind": "video", "track": "V2", "start": 18.4, "in": 18.4, "duration": 75.6, "name": "Presenter — bottom right", "props": {"fit": "contain", "x": 358, "y": 647, "scale": 0.27, "cropT": 15, "cropB": 15, "cornerRadius": 30, "volume": 0}},
+    {"id": "c_master_audio", "mediaId": "m_presenter", "kind": "audio", "track": "A1", "start": 0, "in": 0, "duration": 99.7, "name": "Master narration", "props": {"volume": 1, "pan": 0, "speed": 1}}
+  ]
+}
