@@ -1,0 +1,104 @@
+name: Deploy FableCut editor to Cloudflare
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'fablecut/**'
+      - 'functions/**'
+      - 'editor/media/rooftop-7000/**'
+      - 'scripts/build-fablecut-pages.sh'
+      - 'wrangler.jsonc'
+      - '.github/workflows/deploy-fablecut-cloudflare.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-fablecut-cloudflare
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      R2_BUCKET: qserve-video-editor
+      PROJECT_NAME: runactions
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify Cloudflare credentials
+        run: npx --yes wrangler@latest whoami
+
+      - name: Ensure R2 bucket exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npx --yes wrangler@latest r2 bucket list --remote 2>&1 | tee /tmp/r2-buckets.txt | grep -Fq "$R2_BUCKET"; then
+            echo "R2 bucket $R2_BUCKET already exists"
+          else
+            echo "Creating R2 bucket $R2_BUCKET"
+            npx --yes wrangler@latest r2 bucket create "$R2_BUCKET"
+          fi
+
+      - name: Seed Rooftop project once
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY="$R2_BUCKET/projects/rooftop-7000/project.json"
+          if npx --yes wrangler@latest r2 object get "$KEY" --file=/tmp/rooftop-project.json --remote >/tmp/r2-get.log 2>&1; then
+            echo "Rooftop shared project already exists in R2; keeping saved revision"
+          else
+            echo "Seeding Rooftop shared project into R2"
+            npx --yes wrangler@latest r2 object put "$KEY" \
+              --file=fablecut/projects/rooftop-7000/project.json \
+              --content-type='application/json; charset=utf-8' \
+              --remote
+          fi
+
+      - name: Build FableCut Pages bundle
+        run: bash scripts/build-fablecut-pages.sh
+
+      - name: Deploy Pages + Functions + R2 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest pages deploy \
+            --branch=main \
+            --commit-hash="$GITHUB_SHA" \
+            --commit-message="QServe FableCut ${GITHUB_SHA::7}"
+
+      - name: Smoke test production editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://${PROJECT_NAME}.pages.dev"
+          for i in {1..12}; do
+            if curl -fsS --max-time 20 "$BASE/?project=rooftop-7000" -o /tmp/editor.html \
+              && grep -Fq 'FableCut' /tmp/editor.html \
+              && curl -fsS --max-time 20 "$BASE/api/project?project=rooftop-7000" -o /tmp/project.json \
+              && python - <<'PY'
+import json
+p=json.load(open('/tmp/project.json'))
+assert p.get('name')
+assert isinstance(p.get('clips'), list) and p['clips']
+assert isinstance(p.get('media'), list) and p['media']
+print('R2 project revision:', p.get('revision'))
+PY
+            then
+              echo "Production editor smoke test passed: $BASE/?project=rooftop-7000"
+              exit 0
+            fi
+            echo "Waiting for production alias... attempt $i/12"
+            sleep 5
+          done
+          echo "Production editor smoke test failed" >&2
+          exit 1
