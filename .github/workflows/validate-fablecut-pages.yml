@@ -1,0 +1,45 @@
+name: Validate FableCut Pages bundle
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'fablecut/**'
+      - 'functions/**'
+      - 'editor/media/rooftop-7000/**'
+      - 'scripts/build-fablecut-pages.sh'
+      - '.github/workflows/validate-fablecut-pages.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build FableCut Pages bundle
+        run: bash scripts/build-fablecut-pages.sh
+
+      - name: Validate bundle
+        run: |
+          test -s dist/index.html
+          test -s dist/app.js
+          test -s dist/qserve-bootstrap.js
+          test -s dist/projects/rooftop-7000.json
+          test -s dist/media/rooftop-7000-presenter.mp4
+          test -s dist/media/rooftop-7000-product.mp4
+          grep -q 'qserve-bootstrap.js' dist/index.html
+          grep -q 'app.js' dist/index.html
+          python -m json.tool dist/projects/rooftop-7000.json >/dev/null
+          python -m json.tool dist/library-manifest.json >/dev/null
+
+      - name: Upload Pages bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: fablecut-pages-dist
+          path: dist/
+          retention-days: 7
