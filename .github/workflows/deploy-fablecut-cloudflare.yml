@@ -106,10 +106,30 @@ jobs:
               && curl -fsS --max-time 20 "$BASE/api/project?project=rooftop-7000" -o /tmp/project.json \
               && python -c "import json; p=json.load(open('/tmp/project.json')); assert p.get('name'); assert isinstance(p.get('clips'), list) and p['clips']; assert isinstance(p.get('media'), list) and p['media']; print('R2 project revision:', p.get('revision'))"; then
               echo "Production editor smoke test passed: $BASE/?project=rooftop-7000"
-              exit 0
+              break
+            fi
+            if [ "$i" = 12 ]; then
+              echo "Production editor smoke test failed" >&2
+              exit 1
             fi
             echo "Waiting for production alias... attempt $i/12"
             sleep 5
           done
-          echo "Production editor smoke test failed" >&2
-          exit 1
+
+          curl -fsS --max-time 180 \
+            -X POST \
+            -H "Origin: $BASE" \
+            -H 'Content-Type: application/json' \
+            --data '{}' \
+            "$BASE/api/optimize?project=rooftop-7000" \
+            -o /tmp/optimization.json
+          python - <<'PY'
+          import json
+          p=json.load(open('/tmp/optimization.json'))
+          segments=p.get('segments') or []
+          skipped=p.get('skipped') or []
+          print('Optimization segments:', len(segments), 'skipped:', len(skipped))
+          if not segments:
+              print(json.dumps(p, indent=2))
+              raise SystemExit('Playback optimizer produced zero segments')
+          PY
