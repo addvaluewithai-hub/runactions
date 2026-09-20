@@ -116,7 +116,7 @@ jobs:
             sleep 5
           done
 
-          curl -fsS --max-time 180 \
+          curl -fsS --max-time 240 \
             -X POST \
             -H "Origin: $BASE" \
             -H 'Content-Type: application/json' \
@@ -125,11 +125,30 @@ jobs:
             -o /tmp/optimization.json
           python - <<'PY'
           import json
-          p=json.load(open('/tmp/optimization.json'))
-          segments=p.get('segments') or []
-          skipped=p.get('skipped') or []
-          print('Optimization segments:', len(segments), 'skipped:', len(skipped))
-          if not segments:
-              print(json.dumps(p, indent=2))
-              raise SystemExit('Playback optimizer produced zero segments')
+          project=json.load(open('/tmp/project.json'))
+          opt=json.load(open('/tmp/optimization.json'))
+          segments=opt.get('segments') or []
+          skipped=opt.get('skipped') or []
+          disabled=set(project.get('disabledTracks') or [])
+          expected=[]
+          for clip in project.get('clips') or []:
+              if clip.get('kind') != 'video' or clip.get('track') in disabled:
+                  continue
+              duration=float(clip.get('duration') or 0)
+              speed=float((clip.get('props') or {}).get('speed') or 1)
+              if duration > 0 and speed > 0 and duration * speed <= 55:
+                  expected.append(str(clip.get('id')))
+          actual=[str(s.get('clipId')) for s in segments if s.get('clipId')]
+          print('Optimization mode:', opt.get('mode'))
+          print('Expected video clips:', len(expected), 'optimized:', len(actual), 'skipped:', len(skipped))
+          if opt.get('mode') != 'one-proxy-per-clip':
+              print(json.dumps(opt, indent=2))
+              raise SystemExit('Playback optimizer is not in one-proxy-per-clip mode')
+          if len(actual) != len(set(actual)):
+              raise SystemExit('Playback optimizer returned duplicate clip mappings')
+          if set(actual) != set(expected) or skipped:
+              print('Missing:', sorted(set(expected)-set(actual)))
+              print('Unexpected:', sorted(set(actual)-set(expected)))
+              print(json.dumps(opt, indent=2))
+              raise SystemExit('Playback optimizer did not create exactly one proxy per eligible video clip')
           PY
