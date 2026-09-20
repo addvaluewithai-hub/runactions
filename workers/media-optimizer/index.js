@@ -17,6 +17,11 @@ function safeId(value) {
   return String(value || 'media').replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 72) || 'media';
 }
 
+function safeObjectName(value) {
+  if (!value || value.includes('/') || value.includes('\\') || value.includes('..')) return null;
+  return String(value).slice(0, 220);
+}
+
 function round3(value) {
   return Math.round(Number(value) * 1000) / 1000;
 }
@@ -63,6 +68,30 @@ function mergeRanges(ranges) {
   return out;
 }
 
+async function getSourceBody({ env, slug, origin, media }) {
+  const raw = String(media?.src || '');
+  const sourceUrl = new URL(raw, origin);
+  if (sourceUrl.origin !== origin) throw new Error(`Refusing cross-origin media source: ${raw}`);
+
+  let key = null;
+  if (sourceUrl.pathname === '/api/media') {
+    const requestSlug = safeSlug(sourceUrl.searchParams.get('project') || slug);
+    const objectName = safeObjectName(sourceUrl.searchParams.get('key'));
+    if (requestSlug !== slug || !objectName) throw new Error(`Invalid R2 media source: ${raw}`);
+    key = `media/${slug}/${objectName}`;
+  } else if (sourceUrl.pathname.startsWith('/media/')) {
+    const filename = safeObjectName(decodeURIComponent(sourceUrl.pathname.split('/').pop() || ''));
+    if (!filename) throw new Error(`Invalid static media source: ${raw}`);
+    key = `sources/${slug}/${filename}`;
+  } else {
+    throw new Error(`Unsupported media source for playback optimization: ${raw}`);
+  }
+
+  const source = await env.QSERVE_PROJECTS.get(key);
+  if (!source?.body) throw new Error(`Playback source mirror is missing in R2: ${key}`);
+  return source.body;
+}
+
 async function optimizeSegment({ env, slug, origin, media, range }) {
   const mediaKey = safeId(media.id);
   const startMs = Math.max(0, Math.round(range.start * 1000));
@@ -73,21 +102,10 @@ async function optimizeSegment({ env, slug, origin, media, range }) {
 
   const existing = await env.QSERVE_PROJECTS.head(objectKey);
   if (!existing) {
-    const sourceUrl = new URL(media.src, origin);
-    if (sourceUrl.origin !== origin) throw new Error(`Refusing cross-origin media source: ${media.src}`);
-    if (!(sourceUrl.pathname.startsWith('/media/') || sourceUrl.pathname === '/api/media')) {
-      throw new Error(`Unsupported media source for playback optimization: ${media.src}`);
-    }
-
-    // Workers fetch does not support the browser-only `force-cache` request mode.
-    // Let Cloudflare handle edge caching normally; the generated proxy itself is
-    // persisted in R2, so the source is only fetched when a proxy is missing.
-    const source = await fetch(sourceUrl.toString());
-    if (!source.ok || !source.body) throw new Error(`Source fetch failed (${source.status}) for ${media.name || media.id}`);
-
+    const sourceBody = await getSourceBody({ env, slug, origin, media });
     const duration = round3(range.end - range.start);
     const result = env.MEDIA
-      .input(source.body)
+      .input(sourceBody)
       .transform({ width: 360, fit: 'contain' })
       .output({
         mode: 'video',
