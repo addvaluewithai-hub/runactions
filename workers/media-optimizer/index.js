@@ -79,7 +79,10 @@ async function optimizeSegment({ env, slug, origin, media, range }) {
       throw new Error(`Unsupported media source for playback optimization: ${media.src}`);
     }
 
-    const source = await fetch(sourceUrl.toString(), { cache: 'force-cache' });
+    // Workers fetch does not support the browser-only `force-cache` request mode.
+    // Let Cloudflare handle edge caching normally; the generated proxy itself is
+    // persisted in R2, so the source is only fetched when a proxy is missing.
+    const source = await fetch(sourceUrl.toString());
     if (!source.ok || !source.body) throw new Error(`Source fetch failed (${source.status}) for ${media.name || media.id}`);
 
     const duration = round3(range.end - range.start);
