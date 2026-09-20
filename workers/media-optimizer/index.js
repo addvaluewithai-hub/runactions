@@ -114,10 +114,14 @@ async function optimizeSegment({ env, slug, origin, media, range }) {
         audio: false,
       });
 
-    const contentType = await result.contentType();
-    const mediaBody = await result.media();
-    await env.QSERVE_PROJECTS.put(objectKey, mediaBody, {
-      httpMetadata: { contentType: contentType || 'video/mp4' },
+    const transformed = await result.response();
+    if (!transformed.ok) {
+      throw new Error(`Media transformation failed (${transformed.status}) for ${media.name || media.id}`);
+    }
+    const contentType = transformed.headers.get('content-type') || 'video/mp4';
+    const mediaBytes = await transformed.arrayBuffer();
+    await env.QSERVE_PROJECTS.put(objectKey, mediaBytes, {
+      httpMetadata: { contentType },
       customMetadata: {
         slug,
         purpose: 'playback-optimization',
