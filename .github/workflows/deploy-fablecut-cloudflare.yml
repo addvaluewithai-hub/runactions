@@ -7,6 +7,7 @@ on:
     paths:
       - 'fablecut/**'
       - 'functions/**'
+      - 'workers/**'
       - 'editor/media/rooftop-7000/**'
       - 'scripts/build-fablecut-pages.sh'
       - 'wrangler.jsonc'
@@ -63,6 +64,9 @@ jobs:
               --content-type='application/json; charset=utf-8' \
               --remote
           fi
+
+      - name: Deploy playback optimizer worker
+        run: npx --yes wrangler@latest deploy -c workers/media-optimizer/wrangler.jsonc
 
       - name: Build FableCut Pages bundle
         run: bash scripts/build-fablecut-pages.sh
