@@ -2,11 +2,17 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "runactions",
   "pages_build_output_dir": "./dist",
-  "compatibility_date": "2026-09-16",
+  "compatibility_date": "2026-09-20",
   "r2_buckets": [
     {
       "binding": "QSERVE_PROJECTS",
       "bucket_name": "qserve-video-editor"
+    }
+  ],
+  "services": [
+    {
+      "binding": "MEDIA_OPTIMIZER",
+      "service": "qserve-media-optimizer"
     }
   ]
 }
