@@ -1,3 +1,4 @@
+// QServe editor bridge. Kept separate from upstream FableCut so upgrades remain replaceable.
 (() => {
   const params = new URLSearchParams(location.search);
   const slug = (params.get('project') || 'rooftop-7000').toLowerCase();
@@ -200,33 +201,22 @@
       }
     }
 
-    // FableCut sends raw file bodies to /api/upload?name=... when connected.
-    // Scope every upload to this QServe project so Replace Media and drag/drop
-    // survive page refreshes and are available to the later GitHub render.
     if (parsed.pathname === '/api/upload') {
       return nativeFetch(withProjectParam(parsed), init);
     }
 
-    // Import-from-URL is also persisted to R2 instead of temporary browser state.
     if (parsed.pathname === '/api/import-url') {
       return nativeFetch(withProjectParam(parsed), init);
     }
 
-    // The stock editor asks /api/media for server media discovery. Scope that
-    // request too, while preserving keyed /api/media URLs stored in project.json.
     if (parsed.pathname === '/api/media') {
       return nativeFetch(withProjectParam(parsed), init);
     }
 
-    // Keep FableCut's bundled SFX, elements, animated SVGs and custom fonts on
-    // Pages without needing its Node server just to list static files.
     if (parsed.pathname === '/api/library') {
       return staticLibrary(parsed.searchParams.get('dir') || '');
     }
 
-    // Final production export is intentionally not a browser/server concern in
-    // QServe. FableCut may probe its stock Node ffmpeg endpoint; report it as
-    // unavailable so the UI never implies that Pages is our production renderer.
     if (parsed.pathname === '/api/export/ffmpeg') {
       return new Response(JSON.stringify({ available: false }), {
         status: 200,
@@ -237,9 +227,6 @@
     return nativeFetch(input, init);
   };
 
-  // FableCut's stock Node server uses SSE. Pages persistence is revision-based
-  // instead; poll lightly so edits written by an agent can show up without a
-  // permanent Node process.
   async function pollRevision() {
     try {
       const r = await nativeFetch(projectApi(), { cache: 'no-store' });
@@ -279,8 +266,6 @@
     optimizeButton.textContent = '⚡ Optimizing…';
 
     try {
-      // FableCut debounces saves by a few hundred milliseconds. Give the latest
-      // edit time to reach R2 before the optimizer snapshots the canonical project.
       await new Promise((resolve) => setTimeout(resolve, 1200));
       const response = await nativeFetch(optimizeApi(), {
         method: 'POST',
