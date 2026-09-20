@@ -65,6 +65,21 @@ jobs:
               --remote
           fi
 
+      - name: Mirror Rooftop playback sources to R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest r2 object put \
+            "$R2_BUCKET/sources/rooftop-7000/rooftop-7000-presenter.mp4" \
+            --file=editor/media/rooftop-7000/presenter_proxy.mp4 \
+            --content-type='video/mp4' \
+            --remote
+          npx --yes wrangler@latest r2 object put \
+            "$R2_BUCKET/sources/rooftop-7000/rooftop-7000-product.mp4" \
+            --file=editor/media/rooftop-7000/product_proxy.mp4 \
+            --content-type='video/mp4' \
+            --remote
+
       - name: Deploy playback optimizer worker
         run: npx --yes wrangler@latest deploy -c workers/media-optimizer/wrangler.jsonc
 
