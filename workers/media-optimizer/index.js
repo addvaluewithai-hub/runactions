@@ -3,10 +3,13 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), {
   headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
 });
 
-const HANDLE_SECONDS = 3;
-const MERGE_GAP_SECONDS = 6;
+// Each timeline video clip gets its own physical preview file. This intentionally
+// does NOT merge adjacent clips: after a split, the two pieces should behave like
+// two small videos in the browser even though production rendering still uses the
+// untouched original source.
+const HANDLE_SECONDS = 1;
 const MAX_SEGMENT_SECONDS = 55;
-const MAX_SEGMENTS = 24;
+const MAX_SEGMENTS = 64;
 const EPS = 0.001;
 
 function safeSlug(value) {
@@ -50,22 +53,13 @@ function clipSourceRange(clip, media) {
   }
 
   if (!(end > start + EPS) || end - start > MAX_SEGMENT_SECONDS + EPS) return null;
-  return { start: round3(start), end: round3(end), speed };
-}
-
-function mergeRanges(ranges) {
-  const sorted = [...ranges].sort((a, b) => a.start - b.start);
-  const out = [];
-  for (const range of sorted) {
-    const last = out[out.length - 1];
-    if (last && range.start <= last.end + MERGE_GAP_SECONDS && Math.max(last.end, range.end) - last.start <= MAX_SEGMENT_SECONDS) {
-      last.end = round3(Math.max(last.end, range.end));
-      last.clipIds.push(...range.clipIds);
-    } else {
-      out.push({ ...range, clipIds: [...range.clipIds] });
-    }
-  }
-  return out;
+  return {
+    sourceIn: round3(sourceIn),
+    sourceEnd: round3(usedEnd),
+    start: round3(start),
+    end: round3(end),
+    speed,
+  };
 }
 
 async function getSourceBody({ env, slug, origin, media }) {
@@ -92,13 +86,14 @@ async function getSourceBody({ env, slug, origin, media }) {
   return source.body;
 }
 
-async function optimizeSegment({ env, slug, origin, media, range }) {
+async function optimizeClip({ env, slug, origin, clip, media, range, ordinal }) {
+  const clipKey = safeId(clip.id);
   const mediaKey = safeId(media.id);
   const startMs = Math.max(0, Math.round(range.start * 1000));
   const endMs = Math.max(startMs + 1, Math.round(range.end * 1000));
-  const objectName = `opt-${mediaKey}-${startMs}-${endMs}.mp4`;
+  const objectName = `opt-${clipKey}-${mediaKey}-${startMs}-${endMs}.mp4`;
   const objectKey = `media/${slug}/${objectName}`;
-  const proxyMediaId = `__qserve_opt_${mediaKey}_${startMs}_${endMs}`;
+  const proxyMediaId = `__qserve_opt_${clipKey}_${startMs}_${endMs}`;
 
   const existing = await env.QSERVE_PROJECTS.head(objectKey);
   if (!existing) {
@@ -116,7 +111,7 @@ async function optimizeSegment({ env, slug, origin, media, range }) {
 
     const transformed = await result.response();
     if (!transformed.ok) {
-      throw new Error(`Media transformation failed (${transformed.status}) for ${media.name || media.id}`);
+      throw new Error(`Media transformation failed (${transformed.status}) for ${clip.name || media.name || clip.id}`);
     }
     const contentType = transformed.headers.get('content-type') || 'video/mp4';
     const mediaBytes = await transformed.arrayBuffer();
@@ -126,6 +121,7 @@ async function optimizeSegment({ env, slug, origin, media, range }) {
         slug,
         purpose: 'playback-optimization',
         originalMediaId: String(media.id),
+        originalClipId: String(clip.id),
         sourceStart: String(range.start),
         sourceEnd: String(range.end),
         generatedAt: new Date().toISOString(),
@@ -133,13 +129,18 @@ async function optimizeSegment({ env, slug, origin, media, range }) {
     });
   }
 
+  const baseName = String(clip.name || media.name || 'Video clip').trim();
   return {
+    clipId: clip.id,
+    clipIds: [clip.id],
     proxyMediaId,
+    proxyName: `⚡ ${String(ordinal).padStart(2, '0')} · ${baseName}`,
     originalMediaId: media.id,
     sourceStart: range.start,
     sourceEnd: range.end,
+    originalSourceIn: range.sourceIn,
+    originalSourceEnd: range.sourceEnd,
     proxySrc: `/api/media?project=${encodeURIComponent(slug)}&key=${encodeURIComponent(objectName)}`,
-    clipIds: range.clipIds,
   };
 }
 
@@ -169,41 +170,40 @@ export default {
 
     const disabled = new Set(Array.isArray(project.disabledTracks) ? project.disabledTracks : []);
     const mediaById = new Map(project.media.map((m) => [m.id, m]));
-    const grouped = new Map();
     const skipped = [];
+    const jobs = [];
 
-    for (const clip of project.clips) {
-      if (clip?.kind !== 'video' || disabled.has(clip.track)) continue;
+    const videoClips = project.clips
+      .filter((clip) => clip?.kind === 'video' && !disabled.has(clip.track))
+      .sort((a, b) => Number(a.start || 0) - Number(b.start || 0) || String(a.id).localeCompare(String(b.id)));
+
+    for (const clip of videoClips) {
       const media = mediaById.get(clip.mediaId);
-      if (!media || media.kind !== 'video') continue;
+      if (!media || media.kind !== 'video') {
+        skipped.push({ clipId: clip.id, reason: 'video media is missing' });
+        continue;
+      }
       const range = clipSourceRange(clip, media);
       if (!range) {
         skipped.push({ clipId: clip.id, reason: 'clip is too long or has unsupported timing' });
         continue;
       }
-      const list = grouped.get(media.id) || [];
-      list.push({ start: range.start, end: range.end, clipIds: [clip.id] });
-      grouped.set(media.id, list);
-    }
-
-    const jobs = [];
-    for (const [mediaId, ranges] of grouped) {
-      const media = mediaById.get(mediaId);
-      for (const range of mergeRanges(ranges)) jobs.push({ media, range });
+      jobs.push({ clip, media, range, ordinal: jobs.length + 1 });
     }
 
     if (jobs.length > MAX_SEGMENTS) {
-      return json({ error: `too many playback segments (${jobs.length}); maximum is ${MAX_SEGMENTS}` }, 400);
+      return json({ error: `too many playback clips (${jobs.length}); maximum is ${MAX_SEGMENTS}` }, 400);
     }
 
     const segments = [];
     for (const job of jobs) {
       try {
-        segments.push(await optimizeSegment({ env, slug, origin, media: job.media, range: job.range }));
+        segments.push(await optimizeClip({ env, slug, origin, ...job }));
       } catch (error) {
         skipped.push({
           mediaId: job.media?.id,
-          clipIds: job.range?.clipIds || [],
+          clipId: job.clip?.id,
+          clipIds: job.clip?.id ? [job.clip.id] : [],
           reason: String(error?.message || error),
         });
       }
@@ -214,6 +214,7 @@ export default {
       slug,
       revision: Number(project.revision || 0),
       generatedAt: new Date().toISOString(),
+      mode: 'one-proxy-per-clip',
       segments,
       skipped,
     });
