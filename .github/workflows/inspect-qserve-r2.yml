@@ -1,0 +1,50 @@
+name: Inspect QServe R2 state
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-qserve-r2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      R2_BUCKET: qserve-video-editor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Inspect saved project and optimization manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT_KEY="$R2_BUCKET/projects/rooftop-7000/project.json"
+          OPT_KEY="$R2_BUCKET/projects/rooftop-7000/optimization.json"
+          npx --yes wrangler@latest r2 object get "$PROJECT_KEY" --file=/tmp/project.json --remote
+          echo '=== PROJECT SUMMARY ==='
+          python - <<'PY'
+          import json
+          p=json.load(open('/tmp/project.json'))
+          print('revision',p.get('revision'))
+          print('media',len(p.get('media',[])),'clips',len(p.get('clips',[])))
+          byid={m.get('id'):m for m in p.get('media',[])}
+          for c in p.get('clips',[]):
+              if c.get('kind')=='video':
+                  m=byid.get(c.get('mediaId'),{})
+                  print('VIDEO',c.get('id'),'track',c.get('track'),'media',c.get('mediaId'),'mediaKind',m.get('kind'),'src',m.get('src'),'in',c.get('in'),'duration',c.get('duration'),'speed',(c.get('props') or {}).get('speed',1))
+          print('disabledTracks',p.get('disabledTracks'))
+          PY
+          if npx --yes wrangler@latest r2 object get "$OPT_KEY" --file=/tmp/optimization.json --remote; then
+            echo '=== OPTIMIZATION MANIFEST ==='
+            cat /tmp/optimization.json
+          else
+            echo 'No optimization manifest found'
+          fi
