@@ -60,6 +60,10 @@
     return Math.max(0, Number(segment?.sourceEnd || 0) - Number(segment?.sourceStart || 0));
   }
 
+  // Runtime-only mapping: every timeline video clip points at its own physical
+  // short proxy file. The saved project remains canonical and still points at the
+  // production source. Matching by clip id is deliberate so a Split really becomes
+  // two independent preview videos instead of two ranges sharing one proxy.
   function applyOptimization(project) {
     const segments = Array.isArray(optimizationManifest?.segments) ? optimizationManifest.segments : [];
     if (!segments.length || !project || !Array.isArray(project.media) || !Array.isArray(project.clips)) {
@@ -73,23 +77,24 @@
       : JSON.parse(JSON.stringify(project));
     const mediaById = new Map(out.media.map((m) => [m.id, m]));
     const addedProxyIds = new Set(out.media.map((m) => m.id));
-    const sorted = [...segments].sort((a, b) => segmentLength(a) - segmentLength(b));
+    const byClipId = new Map(
+      segments
+        .filter((s) => s?.clipId)
+        .map((s) => [String(s.clipId), s])
+    );
     let applied = 0;
 
     for (const clip of out.clips) {
       if (!clip || clip.kind !== 'video') continue;
+      const segment = byClipId.get(String(clip.id));
+      if (!segment || segment.originalMediaId !== clip.mediaId) continue;
+
       const sourceIn = Number(clip.in || 0);
       const duration = Number(clip.duration || 0);
       const speed = Number(clip.props?.speed || 1);
       if (!(duration > 0) || !(speed > 0)) continue;
       const sourceEnd = sourceIn + duration * speed;
-
-      const segment = sorted.find((s) =>
-        s?.originalMediaId === clip.mediaId
-        && Number(s.sourceStart) <= sourceIn + 0.002
-        && Number(s.sourceEnd) >= sourceEnd - 0.002
-      );
-      if (!segment) continue;
+      if (Number(segment.sourceStart) > sourceIn + 0.002 || Number(segment.sourceEnd) < sourceEnd - 0.002) continue;
 
       const original = mediaById.get(segment.originalMediaId);
       if (!original) continue;
@@ -101,7 +106,7 @@
         out.media.push({
           ...original,
           id: proxyId,
-          name: `⚡ ${original.name || 'Optimized preview'}`,
+          name: String(segment.proxyName || `⚡ ${original.name || 'Optimized preview'} · ${clip.id}`),
           src: proxySrc,
           duration: segmentLength(segment),
         });
@@ -244,20 +249,20 @@
     if (optimizeButton.dataset.busy === '1') return;
     if (activeOptimizedClips > 0) {
       optimizeButton.textContent = `⚡ Optimized (${activeOptimizedClips})`;
-      optimizeButton.title = 'Playback proxies are active. Click to rebuild them from the latest saved timeline.';
+      optimizeButton.title = 'Each optimized timeline video clip is using its own short preview file. Click to rebuild from the latest saved timeline.';
     } else if (optimizationManifest?.segments?.length) {
       optimizeButton.textContent = '⚡ Re-optimize';
-      optimizeButton.title = 'Optimized segments exist, but the current timeline has changed. Rebuild playback proxies.';
+      optimizeButton.title = 'Optimized clip files exist, but the current timeline has changed. Rebuild playback proxies.';
     } else {
       optimizeButton.textContent = '⚡ Optimize Playback';
-      optimizeButton.title = 'Create short Cloudflare playback proxies for the video ranges actually used on the timeline.';
+      optimizeButton.title = 'Create one short physical preview video for every video clip currently used on the timeline.';
     }
   }
 
   async function optimizePlayback() {
     if (!optimizeButton || optimizeButton.dataset.busy === '1') return;
     const ok = window.confirm(
-      'Optimize Playback will create short preview videos for the ranges used on the timeline, then reload the editor.\n\nYour saved project and production sources stay unchanged, but the current Undo history will reset. Continue?'
+      'Optimize Playback will create one short preview video for EACH video clip on the timeline, then reload the editor.\n\nYour saved project and production sources stay unchanged, but the current Undo history will reset. Continue?'
     );
     if (!ok) return;
 
@@ -277,10 +282,10 @@
 
       optimizationManifest = body;
       optimizationLoaded = true;
-      optimizeButton.textContent = `✓ Optimized ${body.segments?.length || 0} segment${body.segments?.length === 1 ? '' : 's'}`;
+      optimizeButton.textContent = `✓ Optimized ${body.segments?.length || 0} clip${body.segments?.length === 1 ? '' : 's'}`;
       optimizeButton.title = body.skipped?.length
         ? `${body.skipped.length} long/unsupported clip(s) kept on their existing preview source.`
-        : 'Playback optimization completed.';
+        : 'One short preview file was created for each video clip.';
       setTimeout(() => location.reload(), 650);
     } catch (error) {
       optimizeButton.dataset.busy = '0';
