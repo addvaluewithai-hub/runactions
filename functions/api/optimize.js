@@ -35,7 +35,7 @@ export async function onRequestGet({ request, env }) {
 
   try {
     const manifest = await readJson(env.QSERVE_PROJECTS, `projects/${slug}/optimization.json`);
-    return json(manifest || { ok: true, slug, segments: [], skipped: [] });
+    return json(manifest || { ok: true, slug, mode: 'one-proxy-per-clip', segments: [], skipped: [] });
   } catch {
     return json({ error: 'stored optimization manifest is not valid JSON' }, 500);
   }
@@ -68,6 +68,7 @@ export async function onRequestPost({ request, env }) {
   const manifest = {
     ok: true,
     slug,
+    mode: result.mode || 'one-proxy-per-clip',
     sourceRevision: Number(project.revision || 0),
     generatedAt: result.generatedAt || new Date().toISOString(),
     segments: Array.isArray(result.segments) ? result.segments : [],
@@ -81,6 +82,7 @@ export async function onRequestPost({ request, env }) {
       httpMetadata: { contentType: 'application/json; charset=utf-8' },
       customMetadata: {
         slug,
+        mode: manifest.mode,
         sourceRevision: String(manifest.sourceRevision),
         generatedAt: manifest.generatedAt,
       },
