@@ -60,10 +60,10 @@
     return Math.max(0, Number(segment?.sourceEnd || 0) - Number(segment?.sourceStart || 0));
   }
 
-  // Runtime-only mapping: every timeline video clip points at its own physical
-  // short proxy file. The saved project remains canonical and still points at the
-  // production source. Matching by clip id is deliberate so a Split really becomes
-  // two independent preview videos instead of two ranges sharing one proxy.
+  // Runtime-only mapping: every timeline A/V clip points at its own physical short
+  // proxy file. The saved project remains canonical and still points at the production
+  // source. Matching by clip id is deliberate so a Split really becomes independent
+  // browser media instead of two ranges sharing one long decoder source.
   function applyOptimization(project) {
     const segments = Array.isArray(optimizationManifest?.segments) ? optimizationManifest.segments : [];
     if (!segments.length || !project || !Array.isArray(project.media) || !Array.isArray(project.clips)) {
@@ -85,7 +85,7 @@
     let applied = 0;
 
     for (const clip of out.clips) {
-      if (!clip || clip.kind !== 'video') continue;
+      if (!clip || (clip.kind !== 'video' && clip.kind !== 'audio')) continue;
       const segment = byClipId.get(String(clip.id));
       if (!segment || segment.originalMediaId !== clip.mediaId) continue;
 
@@ -103,13 +103,19 @@
       if (!proxyId || !proxySrc) continue;
 
       if (!addedProxyIds.has(proxyId)) {
-        out.media.push({
+        const proxy = {
           ...original,
           id: proxyId,
+          kind: segment.proxyKind === 'audio' ? 'audio' : 'video',
           name: String(segment.proxyName || `⚡ ${original.name || 'Optimized preview'} · ${clip.id}`),
           src: proxySrc,
           duration: segmentLength(segment),
-        });
+        };
+        if (proxy.kind === 'audio') {
+          delete proxy.width;
+          delete proxy.height;
+        }
+        out.media.push(proxy);
         addedProxyIds.add(proxyId);
       }
 
@@ -249,20 +255,20 @@
     if (optimizeButton.dataset.busy === '1') return;
     if (activeOptimizedClips > 0) {
       optimizeButton.textContent = `⚡ Optimized (${activeOptimizedClips})`;
-      optimizeButton.title = 'Each optimized timeline video clip is using its own short preview file. Click to rebuild from the latest saved timeline.';
+      optimizeButton.title = 'Optimized timeline video and audio clips are using independent short preview media. Click to rebuild from the latest saved timeline.';
     } else if (optimizationManifest?.segments?.length) {
       optimizeButton.textContent = '⚡ Re-optimize';
       optimizeButton.title = 'Optimized clip files exist, but the current timeline has changed. Rebuild playback proxies.';
     } else {
       optimizeButton.textContent = '⚡ Optimize Playback';
-      optimizeButton.title = 'Create one short physical preview video for every video clip currently used on the timeline.';
+      optimizeButton.title = 'Create one short physical preview file for every video/audio clip currently used on the timeline.';
     }
   }
 
   async function optimizePlayback() {
     if (!optimizeButton || optimizeButton.dataset.busy === '1') return;
     const ok = window.confirm(
-      'Optimize Playback will create one short preview video for EACH video clip on the timeline, then reload the editor.\n\nYour saved project and production sources stay unchanged, but the current Undo history will reset. Continue?'
+      'Optimize Playback will create one short preview file for EACH video/audio clip on the timeline, then reload the editor.\n\nYour saved project and production sources stay unchanged, but the current Undo history will reset. Continue?'
     );
     if (!ok) return;
 
@@ -285,7 +291,7 @@
       optimizeButton.textContent = `✓ Optimized ${body.segments?.length || 0} clip${body.segments?.length === 1 ? '' : 's'}`;
       optimizeButton.title = body.skipped?.length
         ? `${body.skipped.length} long/unsupported clip(s) kept on their existing preview source.`
-        : 'One short preview file was created for each video clip.';
+        : 'One independent preview file was created for each supported A/V clip.';
       setTimeout(() => location.reload(), 650);
     } catch (error) {
       optimizeButton.dataset.busy = '0';
