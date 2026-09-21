@@ -77,7 +77,7 @@ jobs:
           # one stable low-res H.264/AAC source from the production recording so
           # BOTH short video and short audio proxies can be cut from the same file.
           python -m pip install --quiet gdown
-          gdown --id 1P_hd1WID6X66cem9vmh84DgAYBYSsf37 -O /tmp/rooftop-product-original.mp4
+          gdown 1P_hd1WID6X66cem9vmh84DgAYBYSsf37 -O /tmp/rooftop-product-original.mp4
           ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,sample_rate,channels \
             -of default=noprint_wrappers=1 /tmp/rooftop-product-original.mp4
           ffmpeg -y -hide_banner -loglevel error \
