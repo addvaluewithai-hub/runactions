@@ -66,18 +66,44 @@ jobs:
               --remote
           fi
 
+      - name: Prepare Rooftop playback sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp editor/media/rooftop-7000/presenter_proxy.mp4 /tmp/rooftop-7000-presenter.mp4
+
+          # The tiny repository product proxy is fine for picture preview, but its
+          # audio stream is not accepted by Cloudflare Media Transformations. Build
+          # one stable low-res H.264/AAC source from the production recording so
+          # BOTH short video and short audio proxies can be cut from the same file.
+          python -m pip install --quiet gdown
+          gdown --id 1P_hd1WID6X66cem9vmh84DgAYBYSsf37 -O /tmp/rooftop-product-original.mp4
+          ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,sample_rate,channels \
+            -of default=noprint_wrappers=1 /tmp/rooftop-product-original.mp4
+          ffmpeg -y -hide_banner -loglevel error \
+            -i /tmp/rooftop-product-original.mp4 \
+            -map 0:v:0 -map 0:a:0 \
+            -vf 'scale=360:-2,fps=30,format=yuv420p' \
+            -c:v libx264 -preset veryfast -crf 25 -tune fastdecode \
+            -g 30 -keyint_min 30 -sc_threshold 0 -bf 0 \
+            -c:a aac -b:a 128k -ar 48000 \
+            -movflags +faststart \
+            /tmp/rooftop-7000-product.mp4
+          ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,sample_rate,channels \
+            -of default=noprint_wrappers=1 /tmp/rooftop-7000-product.mp4
+
       - name: Mirror Rooftop playback sources to R2
         shell: bash
         run: |
           set -euo pipefail
           npx --yes wrangler@latest r2 object put \
             "$R2_BUCKET/sources/rooftop-7000/rooftop-7000-presenter.mp4" \
-            --file=editor/media/rooftop-7000/presenter_proxy.mp4 \
+            --file=/tmp/rooftop-7000-presenter.mp4 \
             --content-type='video/mp4' \
             --remote
           npx --yes wrangler@latest r2 object put \
             "$R2_BUCKET/sources/rooftop-7000/rooftop-7000-product.mp4" \
-            --file=editor/media/rooftop-7000/product_proxy.mp4 \
+            --file=/tmp/rooftop-7000-product.mp4 \
             --content-type='video/mp4' \
             --remote
 
