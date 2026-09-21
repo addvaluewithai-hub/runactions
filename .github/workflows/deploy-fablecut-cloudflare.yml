@@ -76,6 +76,8 @@ jobs:
           # audio stream is not accepted by Cloudflare Media Transformations. Build
           # one stable low-res H.264/AAC source from the production recording so
           # BOTH short video and short audio proxies can be cut from the same file.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
           python -m pip install --quiet gdown
           gdown 1P_hd1WID6X66cem9vmh84DgAYBYSsf37 -O /tmp/rooftop-product-original.mp4
           ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,sample_rate,channels \
