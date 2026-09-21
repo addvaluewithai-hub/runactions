@@ -3,13 +3,13 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), {
   headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
 });
 
-// Each timeline video clip gets its own physical preview file. This intentionally
-// does NOT merge adjacent clips: after a split, the two pieces should behave like
-// two small videos in the browser even though production rendering still uses the
-// untouched original source.
+// Every timeline A/V clip gets its own physical preview file. Video clips become
+// short low-resolution MP4s; audio clips become lightweight M4A files. Production
+// rendering still uses the untouched original media after canonicalization.
 const HANDLE_SECONDS = 1;
-const MAX_SEGMENT_SECONDS = 55;
-const MAX_SEGMENTS = 64;
+const MAX_VIDEO_SEGMENT_SECONDS = 55;
+const MAX_AUDIO_SEGMENT_SECONDS = 180;
+const MAX_SEGMENTS = 128;
 const EPS = 0.001;
 
 function safeSlug(value) {
@@ -30,29 +30,30 @@ function round3(value) {
 }
 
 function clipSourceRange(clip, media) {
-  if (!clip || clip.kind !== 'video') return null;
+  if (!clip || (clip.kind !== 'video' && clip.kind !== 'audio')) return null;
   const duration = Number(clip.duration || 0);
   const sourceIn = Number(clip.in || 0);
   const speed = Number(clip.props?.speed || 1);
   if (!(duration > EPS) || !(speed > 0) || !Number.isFinite(sourceIn)) return null;
 
   const usedEnd = sourceIn + duration * speed;
-  if (usedEnd - sourceIn > MAX_SEGMENT_SECONDS) return null;
+  const maxSegmentSeconds = clip.kind === 'audio' ? MAX_AUDIO_SEGMENT_SECONDS : MAX_VIDEO_SEGMENT_SECONDS;
+  if (usedEnd - sourceIn > maxSegmentSeconds) return null;
 
   const mediaDuration = Number(media?.duration);
   const maxEnd = Number.isFinite(mediaDuration) && mediaDuration > 0 ? mediaDuration : Infinity;
   let start = Math.max(0, sourceIn - HANDLE_SECONDS);
   let end = Math.min(maxEnd, usedEnd + HANDLE_SECONDS);
 
-  if (end - start > MAX_SEGMENT_SECONDS) {
-    const spare = Math.max(0, MAX_SEGMENT_SECONDS - (usedEnd - sourceIn));
+  if (end - start > maxSegmentSeconds) {
+    const spare = Math.max(0, maxSegmentSeconds - (usedEnd - sourceIn));
     const before = Math.min(sourceIn, spare / 2);
     const after = Math.max(0, spare - before);
     start = Math.max(0, sourceIn - before);
     end = Math.min(maxEnd, usedEnd + after);
   }
 
-  if (!(end > start + EPS) || end - start > MAX_SEGMENT_SECONDS + EPS) return null;
+  if (!(end > start + EPS) || end - start > maxSegmentSeconds + EPS) return null;
   return {
     sourceIn: round3(sourceIn),
     sourceEnd: round3(usedEnd),
@@ -91,7 +92,9 @@ async function optimizeClip({ env, slug, origin, clip, media, range, ordinal }) 
   const mediaKey = safeId(media.id);
   const startMs = Math.max(0, Math.round(range.start * 1000));
   const endMs = Math.max(startMs + 1, Math.round(range.end * 1000));
-  const objectName = `opt-${clipKey}-${mediaKey}-${startMs}-${endMs}.mp4`;
+  const isAudio = clip.kind === 'audio';
+  const ext = isAudio ? 'm4a' : 'mp4';
+  const objectName = `opt-${clipKey}-${mediaKey}-${startMs}-${endMs}.${ext}`;
   const objectKey = `media/${slug}/${objectName}`;
   const proxyMediaId = `__qserve_opt_${clipKey}_${startMs}_${endMs}`;
 
@@ -99,27 +102,35 @@ async function optimizeClip({ env, slug, origin, clip, media, range, ordinal }) 
   if (!existing) {
     const sourceBody = await getSourceBody({ env, slug, origin, media });
     const duration = round3(range.end - range.start);
-    const result = env.MEDIA
-      .input(sourceBody)
-      .transform({ width: 360, fit: 'contain' })
-      .output({
-        mode: 'video',
-        time: `${range.start}s`,
-        duration: `${duration}s`,
-        audio: false,
-      });
+    const input = env.MEDIA.input(sourceBody);
+    const result = isAudio
+      ? input.output({
+          mode: 'audio',
+          time: `${range.start}s`,
+          duration: `${duration}s`,
+          format: 'm4a',
+        })
+      : input
+          .transform({ width: 360, fit: 'contain' })
+          .output({
+            mode: 'video',
+            time: `${range.start}s`,
+            duration: `${duration}s`,
+            audio: false,
+          });
 
     const transformed = await result.response();
     if (!transformed.ok) {
       throw new Error(`Media transformation failed (${transformed.status}) for ${clip.name || media.name || clip.id}`);
     }
-    const contentType = transformed.headers.get('content-type') || 'video/mp4';
+    const contentType = transformed.headers.get('content-type') || (isAudio ? 'audio/mp4' : 'video/mp4');
     const mediaBytes = await transformed.arrayBuffer();
     await env.QSERVE_PROJECTS.put(objectKey, mediaBytes, {
       httpMetadata: { contentType },
       customMetadata: {
         slug,
         purpose: 'playback-optimization',
+        previewKind: clip.kind,
         originalMediaId: String(media.id),
         originalClipId: String(clip.id),
         sourceStart: String(range.start),
@@ -129,12 +140,13 @@ async function optimizeClip({ env, slug, origin, clip, media, range, ordinal }) 
     });
   }
 
-  const baseName = String(clip.name || media.name || 'Video clip').trim();
+  const baseName = String(clip.name || media.name || (isAudio ? 'Audio clip' : 'Video clip')).trim();
   return {
     clipId: clip.id,
     clipIds: [clip.id],
     proxyMediaId,
     proxyName: `⚡ ${String(ordinal).padStart(2, '0')} · ${baseName}`,
+    proxyKind: clip.kind,
     originalMediaId: media.id,
     sourceStart: range.start,
     sourceEnd: range.end,
@@ -173,14 +185,17 @@ export default {
     const skipped = [];
     const jobs = [];
 
-    const videoClips = project.clips
-      .filter((clip) => clip?.kind === 'video' && !disabled.has(clip.track))
+    const avClips = project.clips
+      .filter((clip) => (clip?.kind === 'video' || clip?.kind === 'audio') && !disabled.has(clip.track))
       .sort((a, b) => Number(a.start || 0) - Number(b.start || 0) || String(a.id).localeCompare(String(b.id)));
 
-    for (const clip of videoClips) {
+    for (const clip of avClips) {
       const media = mediaById.get(clip.mediaId);
+      // QServe's current timeline audio stems reference MP4 video sources. Media
+      // Transformations can extract their audio directly. Native audio-only source
+      // optimization can be added separately if a future project needs it.
       if (!media || media.kind !== 'video') {
-        skipped.push({ clipId: clip.id, reason: 'video media is missing' });
+        skipped.push({ clipId: clip.id, reason: 'playback optimizer currently requires a video-backed media source' });
         continue;
       }
       const range = clipSourceRange(clip, media);
@@ -214,7 +229,7 @@ export default {
       slug,
       revision: Number(project.revision || 0),
       generatedAt: new Date().toISOString(),
-      mode: 'one-proxy-per-clip',
+      mode: 'one-proxy-per-av-clip',
       segments,
       skipped,
     });
