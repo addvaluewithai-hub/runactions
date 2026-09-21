@@ -10,6 +10,7 @@ on:
       - 'workers/**'
       - 'editor/media/rooftop-7000/**'
       - 'scripts/build-fablecut-pages.sh'
+      - 'scripts/patch_fablecut_preview_playback.py'
       - 'wrangler.jsonc'
       - '.github/workflows/deploy-fablecut-cloudflare.yml'
 
@@ -84,7 +85,12 @@ jobs:
         run: npx --yes wrangler@latest deploy -c workers/media-optimizer/wrangler.jsonc
 
       - name: Build FableCut Pages bundle
-        run: bash scripts/build-fablecut-pages.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/build-fablecut-pages.sh
+          grep -Fq '__QSERVE_PLAYBACK_PATCH__' dist/app.js
+          grep -Fq 'prime-active-av-v1' dist/app.js
 
       - name: Deploy Pages + Functions + R2 binding
         shell: bash
@@ -103,9 +109,11 @@ jobs:
           for i in {1..12}; do
             if curl -fsS --max-time 20 "$BASE/?project=rooftop-7000" -o /tmp/editor.html \
               && grep -Fq 'FableCut' /tmp/editor.html \
+              && curl -fsS --max-time 20 "$BASE/app.js" -o /tmp/app.js \
+              && grep -Fq 'prime-active-av-v1' /tmp/app.js \
               && curl -fsS --max-time 20 "$BASE/api/project?project=rooftop-7000" -o /tmp/project.json \
               && python -c "import json; p=json.load(open('/tmp/project.json')); assert p.get('name'); assert isinstance(p.get('clips'), list) and p['clips']; assert isinstance(p.get('media'), list) and p['media']; print('R2 project revision:', p.get('revision'))"; then
-              echo "Production editor smoke test passed: $BASE/?project=rooftop-7000"
+              echo "Production editor + playback patch smoke test passed: $BASE/?project=rooftop-7000"
               break
             fi
             if [ "$i" = 12 ]; then
@@ -116,7 +124,7 @@ jobs:
             sleep 5
           done
 
-          curl -fsS --max-time 240 \
+          curl -fsS --max-time 360 \
             -X POST \
             -H "Origin: $BASE" \
             -H 'Content-Type: application/json' \
@@ -130,25 +138,33 @@ jobs:
           segments=opt.get('segments') or []
           skipped=opt.get('skipped') or []
           disabled=set(project.get('disabledTracks') or [])
+          media={str(m.get('id')):m for m in project.get('media') or []}
           expected=[]
           for clip in project.get('clips') or []:
-              if clip.get('kind') != 'video' or clip.get('track') in disabled:
+              kind=clip.get('kind')
+              if kind not in ('video','audio') or clip.get('track') in disabled:
+                  continue
+              src=media.get(str(clip.get('mediaId')))
+              if not src or src.get('kind') != 'video':
                   continue
               duration=float(clip.get('duration') or 0)
               speed=float((clip.get('props') or {}).get('speed') or 1)
-              if duration > 0 and speed > 0 and duration * speed <= 55:
+              limit=180 if kind == 'audio' else 55
+              if duration > 0 and speed > 0 and duration * speed <= limit:
                   expected.append(str(clip.get('id')))
           actual=[str(s.get('clipId')) for s in segments if s.get('clipId')]
+          kinds={str(s.get('clipId')):s.get('proxyKind') for s in segments if s.get('clipId')}
           print('Optimization mode:', opt.get('mode'))
-          print('Expected video clips:', len(expected), 'optimized:', len(actual), 'skipped:', len(skipped))
-          if opt.get('mode') != 'one-proxy-per-clip':
+          print('Expected A/V clips:', len(expected), 'optimized:', len(actual), 'skipped:', len(skipped))
+          print('Video proxies:', sum(v == 'video' for v in kinds.values()), 'Audio proxies:', sum(v == 'audio' for v in kinds.values()))
+          if opt.get('mode') != 'one-proxy-per-av-clip':
               print(json.dumps(opt, indent=2))
-              raise SystemExit('Playback optimizer is not in one-proxy-per-clip mode')
+              raise SystemExit('Playback optimizer is not in one-proxy-per-av-clip mode')
           if len(actual) != len(set(actual)):
               raise SystemExit('Playback optimizer returned duplicate clip mappings')
           if set(actual) != set(expected) or skipped:
               print('Missing:', sorted(set(expected)-set(actual)))
               print('Unexpected:', sorted(set(actual)-set(expected)))
               print(json.dumps(opt, indent=2))
-              raise SystemExit('Playback optimizer did not create exactly one proxy per eligible video clip')
+              raise SystemExit('Playback optimizer did not create exactly one proxy per eligible A/V clip')
           PY
