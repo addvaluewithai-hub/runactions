@@ -20,6 +20,10 @@ cp -R "$TMP/fablecut/icons" "$OUT/icons"
 cp -R "$TMP/fablecut/library" "$OUT/library"
 cp fablecut/qserve-bootstrap.js "$OUT/qserve-bootstrap.js"
 
+# Keep upstream FableCut replaceable: QServe's preview-readiness fix is applied as
+# a small fail-fast build patch instead of editing the vendored upstream source.
+python scripts/patch_fablecut_preview_playback.py "$OUT/app.js"
+
 python - "$OUT/index.html" <<'PY'
 from pathlib import Path
 import sys
