@@ -42,10 +42,17 @@ const browser = await chromium.launch({
 });
 
 let page;
+let fatalDialog = null;
 try {
   page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
   page.on('console', (msg) => console.log(`[browser:${msg.type()}] ${msg.text()}`));
   page.on('pageerror', (err) => console.error(`[browser:error] ${err.stack || err.message || err}`));
+  page.on('dialog', async (dialog) => {
+    const message = dialog.message();
+    console.error(`[browser:dialog:${dialog.type()}] ${message}`);
+    if (/export failed:/i.test(message)) fatalDialog = message;
+    try { await dialog.dismiss(); } catch {}
+  });
 
   console.log(`Opening native FableCut at ${baseUrl}`);
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
@@ -80,8 +87,10 @@ try {
   await page.waitForSelector('#exportSetup:not(.hidden)', { timeout: 15_000 });
   await page.selectOption('#exportRangeSel', 'entire');
 
-  const fastDisabled = await page.isDisabled('#engineFast');
-  if (fastDisabled) throw new Error('FableCut Fast (ffmpeg) export is disabled');
+  await page.waitForFunction(() => {
+    const el = document.querySelector('#engineFast');
+    return !!el && !el.disabled;
+  }, null, { timeout: 15_000 });
   await page.check('#engineFast');
 
   await page.waitForFunction(() => {
@@ -106,6 +115,8 @@ try {
   let lastProgress = '';
   let finished = null;
   while (Date.now() - started < timeoutMs) {
+    if (fatalDialog) throw new Error(fatalDialog);
+
     const exports = finishedExports();
     if (exports.length) {
       finished = exports[0].file;
@@ -119,20 +130,23 @@ try {
       hidden: document.querySelector('#exportOverlay')?.classList.contains('hidden') ?? true,
     })).catch(() => ({ title: '', note: '', progress: '', hidden: false }));
 
-    const progressKey = `${status.progress}|${status.title}|${status.note}`;
+    const progressKey = `${status.progress}|${status.title}|${status.note}|${status.hidden}`;
     if (progressKey !== lastProgress) {
-      console.log(`Export status: ${status.progress || '?'} ${status.title} ${status.note}`.trim());
+      console.log(`Export status: ${status.progress || '?'} ${status.title} ${status.note} overlay=${status.hidden ? 'hidden' : 'visible'}`.trim());
       lastProgress = progressKey;
     }
+
     if (status.hidden && Date.now() - started > 5_000) {
-      await sleep(500);
+      await sleep(750);
+      if (fatalDialog) throw new Error(fatalDialog);
       const exportsAfterClose = finishedExports();
       if (exportsAfterClose.length) {
         finished = exportsAfterClose[0].file;
         break;
       }
+      throw new Error(`Native FableCut export closed without producing a file. Last UI state: ${status.title} / ${status.note}`);
     }
-    await sleep(1000);
+    await sleep(500);
   }
 
   if (!finished) {
