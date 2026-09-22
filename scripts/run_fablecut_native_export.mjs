@@ -45,6 +45,9 @@ let page;
 let fatalDialog = null;
 try {
   page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
+  await page.addInitScript(() => {
+    window.__QSERVE_HEADLESS_EXPORT__ = true;
+  });
   page.on('console', (msg) => console.log(`[browser:${msg.type()}] ${msg.text()}`));
   page.on('pageerror', (err) => console.error(`[browser:error] ${err.stack || err.message || err}`));
   page.on('dialog', async (dialog) => {
