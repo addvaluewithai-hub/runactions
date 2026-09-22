@@ -163,7 +163,12 @@ jobs:
             if curl -fsS http://127.0.0.1:7777/api/export/ffmpeg -o /tmp/fablecut-ffmpeg.json \
               && python -c "import json; assert json.load(open('/tmp/fablecut-ffmpeg.json'))['available'] is True"; then
               echo "Native FableCut server is ready"
-              curl -fsS http://127.0.0.1:7777/api/project | python -m json.tool | head -40
+              curl -fsS http://127.0.0.1:7777/api/project -o /tmp/fablecut-project-check.json
+              python - <<'PY'
+          import json
+          p=json.load(open('/tmp/fablecut-project-check.json'))
+          print('Server project:', p.get('name'), 'revision', p.get('revision'), 'canvas', p.get('width'), 'x', p.get('height'), '@', p.get('fps'))
+          PY
               exit 0
             fi
             sleep 1
