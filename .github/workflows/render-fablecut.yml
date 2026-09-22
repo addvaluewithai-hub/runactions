@@ -147,6 +147,7 @@ jobs:
           grep -Fq 'function drawFrame' /tmp/fablecut-native/app.js
           grep -Fq 'await seekVideosTo(t' /tmp/fablecut-native/app.js
           grep -Fq 'drawFrame(t)' /tmp/fablecut-native/app.js
+          python scripts/patch_fablecut_headless_export.py /tmp/fablecut-native/app.js
 
       - name: Start native FableCut server
         shell: bash
