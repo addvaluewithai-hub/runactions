@@ -21,7 +21,9 @@ jobs:
   render:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[render-fablecut]')
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
+    env:
+      FABLECUT_COMMIT: 21ec62f5c1599667d632b78b39e8191ba14f71d9
 
     steps:
       - uses: actions/checkout@v4
@@ -50,16 +52,22 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install production render dependencies
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install native render dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           python -m pip install --upgrade gdown pillow
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
 
       - name: Fetch latest saved FableCut timeline
         run: |
-          rm -rf fablecut-data work output
-          mkdir -p fablecut-data/media work output
+          rm -rf fablecut-data output /tmp/fablecut-native
+          mkdir -p fablecut-data/media output
           if [ -n "$PROJECT_URL" ]; then
             echo "Fetching saved editor timeline from $PROJECT_URL"
             curl --fail --location --retry 3 --header 'Cache-Control: no-cache' "$PROJECT_URL" -o fablecut-data/project.json
@@ -68,6 +76,13 @@ jobs:
             cp "fablecut/projects/$SLUG/project.json" fablecut-data/project.json
           fi
           python -m json.tool fablecut-data/project.json >/dev/null
+          python - <<'PY'
+          import json
+          p=json.load(open('fablecut-data/project.json'))
+          print('Canonical revision:', p.get('revision'))
+          print('Canvas:', p.get('width'), 'x', p.get('height'), '@', p.get('fps'), 'fps')
+          print('Clips:', len(p.get('clips') or []), 'Media:', len(p.get('media') or []))
+          PY
 
       - name: Prepare production media
         run: |
@@ -104,7 +119,7 @@ jobs:
               filename = f'{slug}-import-{mid}-{safe}'
               target = media_dir / filename
               print(f'Fetching editor media for {mid}: {absolute}')
-              req = urllib.request.Request(absolute, headers={'User-Agent':'qserve-fablecut-render/1.0'})
+              req = urllib.request.Request(absolute, headers={'User-Agent':'qserve-fablecut-native-render/1.0'})
               with urllib.request.urlopen(req, timeout=120) as r, open(target, 'wb') as f:
                   while True:
                       b = r.read(1024 * 1024)
@@ -115,81 +130,95 @@ jobs:
           project_path.write_text(json.dumps(project, ensure_ascii=False, indent=2) + '\n')
           PY
 
-      - name: Normalize timeline video sources
+      - name: Normalize video sources for frame-exact browser seeking
         run: |
           python factory/normalize_fablecut_media.py \
             --project fablecut-data/project.json \
             --data-dir fablecut-data
 
-      - name: Bridge FableCut media into QServe render workspace
+      - name: Checkout pinned native FableCut
+        shell: bash
         run: |
-          python - <<'PY'
-          import json, pathlib, shutil
+          set -euo pipefail
+          git clone --quiet --no-checkout https://github.com/ronak-create/FableCut.git /tmp/fablecut-native
+          git -C /tmp/fablecut-native checkout --quiet "$FABLECUT_COMMIT"
+          test "$(git -C /tmp/fablecut-native rev-parse HEAD)" = "$FABLECUT_COMMIT"
+          echo "Pinned FableCut: $(git -C /tmp/fablecut-native rev-parse HEAD)"
+          grep -Fq 'function drawFrame' /tmp/fablecut-native/app.js
+          grep -Fq 'await seekVideosTo(t' /tmp/fablecut-native/app.js
+          grep -Fq 'drawFrame(t)' /tmp/fablecut-native/app.js
 
-          p = json.load(open('fablecut-data/project.json'))
-          by_id = {m['id']: m for m in p.get('media', [])}
-          fixed = {
-              'm_presenter': 'presenter.mp4',
-              'm_product': 'product.mp4',
-              'm_qr': 'qr.jpg',
-              'm_mockup': 'mockup.jpg',
-          }
-          for mid, out_name in fixed.items():
-              item = by_id[mid]
-              src = pathlib.Path('fablecut-data') / str(item['src']).lstrip('/')
-              dst = pathlib.Path('work') / out_name
-              dst.parent.mkdir(parents=True, exist_ok=True)
-              shutil.copy2(src, dst)
-              print(f'{mid}: {src} -> {dst}')
-
-          # The proven renderer resolves non-core /media paths below editor/.
-          # Mirror downloaded FableCut stills there at runtime, without committing binaries.
-          for item in p.get('media', []):
-              if item['id'] in fixed:
-                  continue
-              src_url = str(item.get('src') or '')
-              if not src_url.startswith('/media/'):
-                  continue
-              src = pathlib.Path('fablecut-data') / src_url.lstrip('/')
-              dst = pathlib.Path('editor') / src_url.lstrip('/')
-              dst.parent.mkdir(parents=True, exist_ok=True)
-              shutil.copy2(src, dst)
-              print(f"{item['id']}: {src} -> {dst}")
-          PY
-
-      - name: Convert FableCut timeline to production render plan
+      - name: Start native FableCut server
+        shell: bash
         run: |
-          python factory/fablecut_to_editor.py \
-            --project fablecut-data/project.json \
-            --slug "$SLUG" \
-            --out work/render-plan.json
-          python -m json.tool work/render-plan.json >/dev/null
+          set -euo pipefail
+          export FABLECUT_DATA_DIR="$GITHUB_WORKSPACE/fablecut-data"
+          (
+            cd /tmp/fablecut-native
+            nohup env FABLECUT_DATA_DIR="$FABLECUT_DATA_DIR" PORT=7777 FABLECUT_NO_FS_WATCH=1 \
+              node server.js >"$GITHUB_WORKSPACE/output/fablecut-server.log" 2>&1 &
+            echo $! >"$GITHUB_WORKSPACE/output/fablecut-server.pid"
+          )
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:7777/api/export/ffmpeg -o /tmp/fablecut-ffmpeg.json \
+              && python -c "import json; assert json.load(open('/tmp/fablecut-ffmpeg.json'))['available'] is True"; then
+              echo "Native FableCut server is ready"
+              curl -fsS http://127.0.0.1:7777/api/project | python -m json.tool | head -40
+              exit 0
+            fi
+            sleep 1
+          done
+          cat output/fablecut-server.log || true
+          exit 1
 
-      - name: Render FableCut timeline with QServe FFmpeg renderer
+      - name: Native FableCut compositor export
+        env:
+          FABLECUT_URL: http://127.0.0.1:7777
+          FABLECUT_EXPORT_TIMEOUT_MS: '1200000'
         run: |
-          python factory/render_editor_project.py \
-            --project work/render-plan.json \
-            --work work \
-            --out "output/$SLUG.mp4"
+          node scripts/run_fablecut_native_export.mjs \
+            fablecut-data \
+            "output/$SLUG.mp4" \
+            delivery
 
-      - name: QA output
+      - name: Stop native FableCut server
+        if: always()
+        run: |
+          if [ -f output/fablecut-server.pid ]; then
+            kill "$(cat output/fablecut-server.pid)" 2>/dev/null || true
+          fi
+
+      - name: QA native output
         run: |
           EXPECTED="$(python - <<'PY'
           import json
-          p=json.load(open('work/render-plan.json'))
-          print(float(p['duration']))
+          p=json.load(open('fablecut-data/project.json'))
+          disabled=set(p.get('disabledTracks') or [])
+          ends=[]
+          for c in p.get('clips') or []:
+              if c.get('track') in disabled: continue
+              try: ends.append(float(c.get('start') or 0)+float(c.get('duration') or 0))
+              except Exception: pass
+          print(max(ends) if ends else 0)
           PY
           )"
+          echo "Expected timeline duration: $EXPECTED"
           python factory/qa_video.py "output/$SLUG.mp4" --expected-duration "$EXPECTED" --out-dir "output/qa"
+          ffprobe -v error -show_entries \
+            format=duration,size:stream=index,codec_type,codec_name,width,height,avg_frame_rate,sample_rate,channels \
+            -of json "output/$SLUG.mp4" >"output/$SLUG.ffprobe.json"
 
-      - name: Collect render context
+      - name: Collect native render context
         if: always()
         run: |
           mkdir -p output
           cp fablecut-data/project.json "output/$SLUG.fablecut-project.json" 2>/dev/null || true
-          cp work/render-plan.json "output/$SLUG.render-plan.json" 2>/dev/null || true
+          printf '%s\n' "$FABLECUT_COMMIT" >"output/fablecut-upstream-commit.txt"
+          echo 'renderer=native-fablecut-fast-export' >"output/render-engine.txt"
+          echo 'profile=delivery' >>"output/render-engine.txt"
+          echo 'The legacy fablecut_to_editor.py/render_editor_project.py path remains in the repository only as a manual fallback.' >>"output/render-engine.txt"
 
-      - name: Upload render and QA
+      - name: Upload native render and QA
         if: always()
         uses: actions/upload-artifact@v4
         with:
