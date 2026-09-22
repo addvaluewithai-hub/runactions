@@ -15,6 +15,7 @@ const outFile = path.resolve(outArg);
 const exportsDir = path.join(dataDir, 'exports');
 const baseUrl = process.env.FABLECUT_URL || 'http://127.0.0.1:7777';
 const timeoutMs = Number(process.env.FABLECUT_EXPORT_TIMEOUT_MS || 15 * 60 * 1000);
+const browserChannel = process.env.FABLECUT_BROWSER_CHANNEL || 'chrome';
 
 fs.mkdirSync(exportsDir, { recursive: true });
 fs.mkdirSync(path.dirname(outFile), { recursive: true });
@@ -32,7 +33,9 @@ function finishedExports() {
     .sort((a, b) => fs.statSync(b.file).mtimeMs - fs.statSync(a.file).mtimeMs);
 }
 
+console.log(`Launching Playwright with browser channel=${browserChannel}`);
 const browser = await chromium.launch({
+  channel: browserChannel,
   headless: true,
   args: [
     '--autoplay-policy=no-user-gesture-required',
@@ -60,6 +63,24 @@ try {
   console.log(`Opening native FableCut at ${baseUrl}`);
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.waitForSelector('#btnExport', { state: 'visible', timeout: 60_000 });
+
+  const codecInfo = await page.evaluate(() => {
+    const video = document.createElement('video');
+    const audio = document.createElement('audio');
+    return {
+      userAgent: navigator.userAgent,
+      h264: video.canPlayType('video/mp4; codecs="avc1.42E01E"'),
+      aac: audio.canPlayType('audio/mp4; codecs="mp4a.40.2"'),
+      h264Aac: video.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"'),
+      mediaSourceH264Aac: typeof MediaSource !== 'undefined'
+        ? MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E, mp4a.40.2"')
+        : null,
+    };
+  });
+  console.log('Browser codec preflight:', JSON.stringify(codecInfo));
+  if (!codecInfo.h264 || !codecInfo.aac) {
+    throw new Error(`Browser lacks required H.264/AAC support: ${JSON.stringify(codecInfo)}`);
+  }
 
   await page.waitForFunction(async () => {
     try {
