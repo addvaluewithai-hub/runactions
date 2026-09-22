@@ -9,8 +9,11 @@ def run(cmd):
 def encode(out,inputs,filt,maps,fps=30):
     cmd=['ffmpeg','-hide_banner','-loglevel','error','-y',*inputs,'-filter_complex',filt]
     for m in maps: cmd+=['-map',m]
-    cmd+=['-an','-r',str(fps),'-c:v','libx264','-preset','veryfast','-crf','19','-pix_fmt','yuv420p',str(out)]
+    cmd+=['-an','-r',str(fps),'-c:v','libx264','-preset','medium','-crf','17','-pix_fmt','yuv420p',str(out)]
     run(cmd)
+
+def render_gap(out,dur,w,h,fps,color='#f4f0e7'):
+    run(['ffmpeg','-hide_banner','-loglevel','error','-y','-f','lavfi','-i',f'color=c={color}:s={w}x{h}:r={fps}:d={dur:.6f}','-an','-r',str(fps),'-c:v','libx264','-preset','medium','-crf','17','-pix_fmt','yuv420p',out])
 
 def pip_filter(w,h,pip,label='1:v'):
     pw=max(180,int(w*float(pip.get('width',.25)))); ph=int(pw*1.28); m=int(pip.get('margin',36)); b=int(pip.get('bottom',132)); bd=int(pip.get('border',4))
@@ -127,7 +130,7 @@ def apply_layers(base,p,root,work,slug,out):
         # overlays paint the border before the alpha mask above.
         if bd>0 and radius<=0:
             nxt=f'cb{layer_n}'; filters.append(f"[{cur}]drawbox=x={x}:y={y}:w={tw}:h={th}:color={c.get('borderColor','#ffffff')}:t={bd}:enable='{en}'[{nxt}]");cur=nxt;layer_n+=1
-    filters.append(f'[{cur}]format=yuv420p[v]');cmd+=['-filter_complex',';'.join(filters),'-map','[v]','-an','-t',f'{total:.3f}','-c:v','libx264','-preset','veryfast','-crf','19','-pix_fmt','yuv420p',out];run(cmd)
+    filters.append(f'[{cur}]format=yuv420p[v]');cmd+=['-filter_complex',';'.join(filters),'-map','[v]','-an','-t',f'{total:.3f}','-c:v','libx264','-preset','medium','-crf','17','-pix_fmt','yuv420p',out];run(cmd)
 
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--project',required=True);ap.add_argument('--work',default='work');ap.add_argument('--out',required=True);args=ap.parse_args()
@@ -139,21 +142,28 @@ def main():
         if not v.exists():raise FileNotFoundError(v)
     has_presenter_track=any(t.get('kind')=='presenter' and t.get('clips') for t in p['tracks'])
     clips=sorted(main_track['clips'],key=lambda c:c['start']);expected=0.0
+    background=p.get('background') or '#f4f0e7'
     with tempfile.TemporaryDirectory(prefix='qserve-editor-render-') as tmp:
-        td=Path(tmp);segs=[]
-        for i,c in enumerate(clips):
+        td=Path(tmp);segs=[];seq=0
+        for c in clips:
             s=float(c['start']);e=float(c['end']);d=e-s
-            if abs(s-expected)>.08:raise ValueError(f'Gap/overlap before {c["id"]}: expected {expected:.3f}, got {s:.3f}')
+            if s < expected-.08:raise ValueError(f'Overlap before {c["id"]}: expected at least {expected:.3f}, got {s:.3f}')
+            if s > expected+.001:
+                gap=td/f'{seq:03d}.mp4';seq+=1
+                render_gap(gap,s-expected,w,h,fps,background);segs.append(gap)
             if d<=0:raise ValueError(f'Bad duration: {c["id"]}')
-            aid=c['asset'];out=td/f'{i:03d}.mp4';legacy=bool(c.get('pip')) and not has_presenter_track
+            aid=c['asset'];out=td/f'{seq:03d}.mp4';seq+=1;legacy=bool(c.get('pip')) and not has_presenter_track
             if aid=='presenter':render_presenter(paths[aid],float(c.get('sourceIn',s)),d,out,w,h,fps,c)
             elif aid=='product':render_product(paths[aid],presenter,s,float(c.get('sourceIn',0)),d,out,w,h,fps,pip,media[aid],c,legacy)
             else:render_image(paths[aid],presenter,s,d,out,w,h,fps,pip,c,legacy)
             segs.append(out);expected=e
-        if abs(expected-total)>.08:raise ValueError(f'Timeline ends at {expected:.3f}, expected {total:.3f}')
+        if expected > total+.08:raise ValueError(f'Timeline ends at {expected:.3f}, expected {total:.3f}')
+        if total > expected+.001:
+            gap=td/f'{seq:03d}.mp4'
+            render_gap(gap,total-expected,w,h,fps,background);segs.append(gap)
         concat=td/'concat.txt';concat.write_text('\n'.join(f"file '{x.as_posix()}'" for x in segs)+'\n');base=td/'base.mp4';run(['ffmpeg','-hide_banner','-loglevel','error','-y','-f','concat','-safe','0','-i',concat,'-c','copy',base])
         layered=td/'layered.mp4';apply_layers(base,p,root,work,slug,layered)
         output=Path(args.out);output.parent.mkdir(parents=True,exist_ok=True);ff=(f'[0:v]tpad=stop_mode=clone:stop_duration=1.0,fps={fps},format=yuv420p[v];[1:a]apad=pad_dur=1.0[a]')
-        run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',layered,'-i',presenter,'-filter_complex',ff,'-map','[v]','-map','[a]','-c:v','libx264','-preset','veryfast','-crf','19','-pix_fmt','yuv420p','-c:a','aac','-b:a','192k','-t',f'{total:.3f}','-movflags','+faststart',output])
+        run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',layered,'-i',presenter,'-filter_complex',ff,'-map','[v]','-map','[a]','-c:v','libx264','-preset','medium','-crf','17','-pix_fmt','yuv420p','-c:a','aac','-b:a','192k','-t',f'{total:.3f}','-movflags','+faststart',output])
     print(f'Rendered {output}')
 if __name__=='__main__':main()
