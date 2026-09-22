@@ -94,7 +94,15 @@ def apply_layers(base,p,root,work,slug,out):
     if not extra:
         run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',base,'-c','copy',out]); return
     cmd=['ffmpeg','-hide_banner','-loglevel','error','-y','-i',base]; filters=[]; cur='0:v'; input_idx=1; layer_n=0
-    for ti,t,c in sorted(extra,key=lambda x:x[0]):
+    def z_key(item):
+        ti,t,_=item
+        short=str(t.get('short') or '')
+        # FableCut exposes video tracks top-to-bottom as V4,V3,V2,V1.
+        # Composite bottom-to-top so the numerically higher track is visually above.
+        if len(short)>1 and short[0].upper()=='V' and short[1:].isdigit():
+            return (0,int(short[1:]))
+        return (1,ti)
+    for ti,t,c in sorted(extra,key=z_key):
         s=float(c['start']);e=float(c['end']);d=max(.05,e-s); kind=t.get('kind','overlay'); l={'main':{'x':0,'y':0,'w':100,'h':100},'presenter':{'x':70,'y':66,'w':26,'h':28},'overlay':{'x':55,'y':8,'w':40,'h':36},'graphics':{'x':10,'y':10,'w':80,'h':18}}.get(kind,{'x':55,'y':8,'w':40,'h':36}); l={**l,**c.get('layout',{})}; x=int(W*float(l.get('x',0))/100);y=int(H*float(l.get('y',0))/100);tw=max(2,int(W*float(l.get('w',40))/100));th=max(2,int(H*float(l.get('h',36))/100)); en=f"between(t,{s:.3f},{e:.3f})"
         if c.get('type')=='text':
             st=c.get('textStyle',{}); txt=esc_text(c.get('text','Text')); fs=int(st.get('fontSize',48)); color=st.get('color','#ffffff'); bg=st.get('background','#000000'); align=st.get('align','center'); tx=x+10 if align=='left' else x+tw-10 if align=='right' else x+tw/2; exprx=f'{tx}-text_w' if align=='right' else str(tx) if align=='left' else f'{tx}-text_w/2'; ty=f'{y}+({th}-text_h)/2'; nxt=f'c{layer_n}';filters.append(f"[{cur}]drawtext=text='{txt}':x={exprx}:y={ty}:fontsize={fs}:fontcolor={color}:box=1:boxcolor={bg}@0.65:boxborderw=12:enable='{en}'[{nxt}]");cur=nxt;layer_n+=1;continue
