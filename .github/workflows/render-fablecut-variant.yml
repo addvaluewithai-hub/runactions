@@ -33,6 +33,8 @@ jobs:
     timeout-minutes: 35
     env:
       FABLECUT_COMMIT: 21ec62f5c1599667d632b78b39e8191ba14f71d9
+      CLOUDINARY_URL: ${{ secrets.CLOUDINARY_URL }}
+      CLOUDINARY_ASSET_FOLDER: qserve-pilot-videos
 
     steps:
       - uses: actions/checkout@v4
@@ -95,7 +97,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           python -m pip install --upgrade gdown pillow
-          npm install --no-save playwright@1.55.0
+          npm install --no-save playwright@1.55.0 cloudinary@2
           npx playwright install --with-deps chromium
 
       - name: Fetch latest saved FableCut master timeline
@@ -273,7 +275,17 @@ jobs:
           echo "WhatsApp delivery size: $SIZE bytes"
           test "$SIZE" -lt 14000000
 
-      - name: Remove native intermediate after final QA
+      - name: Upload WhatsApp delivery to Cloudinary
+        if: ${{ env.CLOUDINARY_URL != '' }}
+        env:
+          CLOUDINARY_OUTPUT_DIR: output
+        run: |
+          node scripts/upload_video_cloudinary.mjs \
+            "output/$OUTPUT_STEM.mp4" \
+            "${VARIANT_SLUG}-qserve-whatsapp" \
+            "$LEAD_NAME"
+
+      - name: Remove native intermediate after final delivery
         run: rm -f "output/$OUTPUT_STEM.native.mp4"
 
       - name: Collect lead variant render context
@@ -282,7 +294,7 @@ jobs:
           mkdir -p output
           cp fablecut-data/project.json "output/$OUTPUT_STEM.fablecut-project.json" 2>/dev/null || true
           printf '%s\n' "$FABLECUT_COMMIT" >"output/fablecut-upstream-commit.txt"
-          printf 'renderer=native-fablecut-fast-export\nprofile=delivery\nlead=%s\nvariant=%s\nwhatsapp_cover_seconds=0.6\nwhatsapp_video_crf=21\nwhatsapp_video_preset=slow\nwhatsapp_audio_bitrate=160k\n' "$LEAD_NAME" "$VARIANT_SLUG" >"output/render-engine.txt"
+          printf 'renderer=native-fablecut-fast-export\nprofile=delivery\nlead=%s\nvariant=%s\nwhatsapp_cover_seconds=0.6\nwhatsapp_video_crf=21\nwhatsapp_video_preset=slow\nwhatsapp_audio_bitrate=160k\ncloudinary_folder=%s\n' "$LEAD_NAME" "$VARIANT_SLUG" "$CLOUDINARY_ASSET_FOLDER" >"output/render-engine.txt"
 
       - name: Upload WhatsApp lead variant and QA
         if: always()
