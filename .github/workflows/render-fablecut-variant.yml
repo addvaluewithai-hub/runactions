@@ -227,7 +227,7 @@ jobs:
         run: |
           node scripts/run_fablecut_native_export.mjs \
             fablecut-data \
-            "output/$OUTPUT_STEM.mp4" \
+            "output/$OUTPUT_STEM.native.mp4" \
             delivery
 
       - name: Stop native FableCut server
@@ -237,7 +237,20 @@ jobs:
             kill "$(cat output/fablecut-server.pid)" 2>/dev/null || true
           fi
 
-      - name: QA native output
+      - name: Package WhatsApp delivery with personalized app cover
+        run: |
+          python factory/package_fablecut_whatsapp.py \
+            --project fablecut-data/project.json \
+            --data-dir fablecut-data \
+            --input "output/$OUTPUT_STEM.native.mp4" \
+            --output "output/$OUTPUT_STEM.mp4" \
+            --cover-seconds 0.6 \
+            --crf 21 \
+            --preset slow \
+            --audio-bitrate 160k
+          ffmpeg -y -ss 0 -i "output/$OUTPUT_STEM.mp4" -frames:v 1 -q:v 2 "output/$OUTPUT_STEM.first-frame.jpg"
+
+      - name: QA WhatsApp delivery output
         run: |
           EXPECTED="$(python - <<'PY'
           import json
@@ -256,6 +269,12 @@ jobs:
           ffprobe -v error -show_entries \
             format=duration,size:stream=index,codec_type,codec_name,width,height,avg_frame_rate,sample_rate,channels \
             -of json "output/$OUTPUT_STEM.mp4" >"output/$OUTPUT_STEM.ffprobe.json"
+          SIZE="$(stat -c%s "output/$OUTPUT_STEM.mp4")"
+          echo "WhatsApp delivery size: $SIZE bytes"
+          test "$SIZE" -lt 14000000
+
+      - name: Remove native intermediate after final QA
+        run: rm -f "output/$OUTPUT_STEM.native.mp4"
 
       - name: Collect lead variant render context
         if: always()
@@ -263,9 +282,9 @@ jobs:
           mkdir -p output
           cp fablecut-data/project.json "output/$OUTPUT_STEM.fablecut-project.json" 2>/dev/null || true
           printf '%s\n' "$FABLECUT_COMMIT" >"output/fablecut-upstream-commit.txt"
-          printf 'renderer=native-fablecut-fast-export\nprofile=delivery\nlead=%s\nvariant=%s\n' "$LEAD_NAME" "$VARIANT_SLUG" >"output/render-engine.txt"
+          printf 'renderer=native-fablecut-fast-export\nprofile=delivery\nlead=%s\nvariant=%s\nwhatsapp_cover_seconds=0.6\nwhatsapp_video_crf=21\nwhatsapp_video_preset=slow\nwhatsapp_audio_bitrate=160k\n' "$LEAD_NAME" "$VARIANT_SLUG" >"output/render-engine.txt"
 
-      - name: Upload native lead variant and QA
+      - name: Upload WhatsApp lead variant and QA
         if: always()
         uses: actions/upload-artifact@v4
         with:
