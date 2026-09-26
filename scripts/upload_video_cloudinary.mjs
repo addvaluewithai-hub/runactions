@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import { v2 as cloudinary } from 'cloudinary';
+import { createRequire } from 'node:module';
 
 const [filePath, publicId, leadName = ''] = process.argv.slice(2);
 if (!filePath || !publicId) {
@@ -11,16 +11,36 @@ if (!fs.existsSync(filePath)) {
   throw new Error(`Video file not found: ${filePath}`);
 }
 
-const cloudinaryUrl = (process.env.CLOUDINARY_URL || '').trim();
+let cloudinaryUrl = (process.env.CLOUDINARY_URL || '').trim();
 if (!cloudinaryUrl) {
   throw new Error('CLOUDINARY_URL is not set');
 }
 
-const parsed = new URL(cloudinaryUrl);
-if (parsed.protocol !== 'cloudinary:') {
-  throw new Error('CLOUDINARY_URL must use cloudinary:// scheme');
+// Cloudinary's dashboard often presents the environment variable as the full
+// shell assignment: CLOUDINARY_URL=cloudinary://.... GitHub Secrets should
+// ideally contain only the URL, but accept both forms (and optional quotes).
+cloudinaryUrl = cloudinaryUrl.replace(/^CLOUDINARY_URL\s*=\s*/i, '').trim();
+if (
+  cloudinaryUrl.length >= 2 &&
+  ((cloudinaryUrl.startsWith('"') && cloudinaryUrl.endsWith('"')) ||
+    (cloudinaryUrl.startsWith("'") && cloudinaryUrl.endsWith("'")))
+) {
+  cloudinaryUrl = cloudinaryUrl.slice(1, -1).trim();
 }
 
+if (!cloudinaryUrl.startsWith('cloudinary://')) {
+  throw new Error(
+    'CLOUDINARY_URL must be the Cloudinary API Environment variable beginning with cloudinary:// (not a dashboard URL or API key alone)'
+  );
+}
+
+// Normalize the environment before loading the Cloudinary SDK because the SDK
+// reads CLOUDINARY_URL during module initialization.
+process.env.CLOUDINARY_URL = cloudinaryUrl;
+const require = createRequire(import.meta.url);
+const { v2: cloudinary } = require('cloudinary');
+
+const parsed = new URL(cloudinaryUrl);
 cloudinary.config({
   cloud_name: parsed.hostname,
   api_key: decodeURIComponent(parsed.username),
