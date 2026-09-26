@@ -1,0 +1,275 @@
+name: Render QServe FableCut lead variant
+
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: QServe FableCut master project slug
+        required: true
+        default: rooftop-7000
+      project_url:
+        description: Optional saved Cloudflare project JSON URL
+        required: false
+        default: ''
+      lead_name:
+        description: Lead / venue name
+        required: true
+      qr_image_url:
+        description: Lead QR image URL
+        required: true
+      app_image_url:
+        description: Lead personalized app image URL
+        required: true
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[render-fablecut-variant]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      FABLECUT_COMMIT: 21ec62f5c1599667d632b78b39e8191ba14f71d9
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve lead variant request
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_SLUG: ${{ inputs.slug }}
+          INPUT_PROJECT_URL: ${{ inputs.project_url }}
+          INPUT_LEAD_NAME: ${{ inputs.lead_name }}
+          INPUT_QR_IMAGE_URL: ${{ inputs.qr_image_url }}
+          INPUT_APP_IMAGE_URL: ${{ inputs.app_image_url }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            SLUG="$INPUT_SLUG"
+            PROJECT_URL="$INPUT_PROJECT_URL"
+            LEAD_NAME="$INPUT_LEAD_NAME"
+            QR_IMAGE_URL="$INPUT_QR_IMAGE_URL"
+            APP_IMAGE_URL="$INPUT_APP_IMAGE_URL"
+          else
+            SLUG="$(printf '%s' "$ISSUE_TITLE" | sed -E 's/^\[render-fablecut-variant\][[:space:]]*//')"
+            PROJECT_URL="$(printf '%s\n' "$ISSUE_BODY" | sed -n -E 's/^project_url:[[:space:]]*(https?:\/\/[^[:space:]]+)[[:space:]]*$/\1/p' | head -1)"
+            LEAD_NAME="$(printf '%s\n' "$ISSUE_BODY" | sed -n -E 's/^lead_name:[[:space:]]*(.*)$/\1/p' | head -1)"
+            QR_IMAGE_URL="$(printf '%s\n' "$ISSUE_BODY" | sed -n -E 's/^qr_image_url:[[:space:]]*(https?:\/\/[^[:space:]]+)[[:space:]]*$/\1/p' | head -1)"
+            APP_IMAGE_URL="$(printf '%s\n' "$ISSUE_BODY" | sed -n -E 's/^app_image_url:[[:space:]]*(https?:\/\/[^[:space:]]+)[[:space:]]*$/\1/p' | head -1)"
+          fi
+          test -n "$SLUG"
+          test -n "$LEAD_NAME"
+          test -n "$QR_IMAGE_URL"
+          test -n "$APP_IMAGE_URL"
+          test -f "fablecut/projects/$SLUG/manifest.json"
+          VARIANT_SLUG="$(python - "$LEAD_NAME" <<'PY'
+          import re, sys
+          s=re.sub(r'[^A-Za-z0-9]+','-',sys.argv[1]).strip('-').lower()
+          print(s or 'lead')
+          PY
+          )"
+          OUTPUT_STEM="${SLUG}-${VARIANT_SLUG}"
+          echo "SLUG=$SLUG" >> "$GITHUB_ENV"
+          echo "PROJECT_URL=$PROJECT_URL" >> "$GITHUB_ENV"
+          echo "LEAD_NAME=$LEAD_NAME" >> "$GITHUB_ENV"
+          echo "QR_IMAGE_URL=$QR_IMAGE_URL" >> "$GITHUB_ENV"
+          echo "APP_IMAGE_URL=$APP_IMAGE_URL" >> "$GITHUB_ENV"
+          echo "VARIANT_SLUG=$VARIANT_SLUG" >> "$GITHUB_ENV"
+          echo "OUTPUT_STEM=$OUTPUT_STEM" >> "$GITHUB_ENV"
+          echo "Rendering lead variant: $LEAD_NAME -> $OUTPUT_STEM"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install native render dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade gdown pillow
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Fetch latest saved FableCut master timeline
+        run: |
+          rm -rf fablecut-data output /tmp/fablecut-native
+          mkdir -p fablecut-data/media output
+          if [ -n "$PROJECT_URL" ]; then
+            echo "Fetching saved editor timeline from $PROJECT_URL"
+            curl --fail --location --retry 3 --header 'Cache-Control: no-cache' "$PROJECT_URL" -o fablecut-data/project.json
+          else
+            echo "No Cloudflare URL supplied; using repository seed"
+            cp "fablecut/projects/$SLUG/project.json" fablecut-data/project.json
+          fi
+          python -m json.tool fablecut-data/project.json >/dev/null
+          python - <<'PY'
+          import json
+          p=json.load(open('fablecut-data/project.json'))
+          print('Canonical revision:', p.get('revision'))
+          print('Canvas:', p.get('width'), 'x', p.get('height'), '@', p.get('fps'), 'fps')
+          print('Clips:', len(p.get('clips') or []), 'Media:', len(p.get('media') or []))
+          PY
+
+      - name: Prepare production media
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, subprocess, urllib.parse, urllib.request
+
+          slug = os.environ['SLUG']
+          project_url = os.environ.get('PROJECT_URL', '').strip()
+          manifest = json.load(open(f'fablecut/projects/{slug}/manifest.json'))
+          project_path = pathlib.Path('fablecut-data/project.json')
+          project = json.load(open(project_path))
+          media_dir = pathlib.Path('fablecut-data/media')
+          media_dir.mkdir(parents=True, exist_ok=True)
+
+          known = manifest.get('media', {})
+          for item in project.get('media', []):
+              mid = item.get('id')
+              src = str(item.get('src') or '')
+              meta = known.get(mid)
+              if meta and meta.get('driveId'):
+                  filename = pathlib.PurePosixPath(meta['filename']).name
+                  target = media_dir / filename
+                  print(f'Downloading production original for {mid} -> {target}')
+                  subprocess.check_call(['gdown', meta['driveId'], '-O', str(target)])
+                  item['src'] = '/media/' + filename
+                  continue
+
+              if not project_url:
+                  raise SystemExit(f'Unknown media {mid} ({src}) and no project_url was supplied')
+              absolute = urllib.parse.urljoin(project_url, src)
+              parsed = urllib.parse.urlparse(absolute)
+              name = pathlib.PurePosixPath(parsed.path).name or f'{mid}.bin'
+              safe = ''.join(c if c.isalnum() or c in '._- ' else '_' for c in name)[:100]
+              filename = f'{slug}-import-{mid}-{safe}'
+              target = media_dir / filename
+              print(f'Fetching editor media for {mid}: {absolute}')
+              req = urllib.request.Request(absolute, headers={'User-Agent':'qserve-fablecut-native-render/1.0'})
+              with urllib.request.urlopen(req, timeout=120) as r, open(target, 'wb') as f:
+                  while True:
+                      b = r.read(1024 * 1024)
+                      if not b: break
+                      f.write(b)
+              item['src'] = '/media/' + filename
+
+          project_path.write_text(json.dumps(project, ensure_ascii=False, indent=2) + '\n')
+          PY
+
+      - name: Inject lead QR and app images into master copy
+        run: |
+          python factory/apply_fablecut_lead_variant.py \
+            --project fablecut-data/project.json \
+            --data-dir fablecut-data \
+            --lead-name "$LEAD_NAME" \
+            --qr-url "$QR_IMAGE_URL" \
+            --app-url "$APP_IMAGE_URL"
+
+      - name: Normalize video sources for frame-exact browser seeking
+        run: |
+          python factory/normalize_fablecut_media.py \
+            --project fablecut-data/project.json \
+            --data-dir fablecut-data
+
+      - name: Checkout pinned native FableCut
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet --no-checkout https://github.com/ronak-create/FableCut.git /tmp/fablecut-native
+          git -C /tmp/fablecut-native checkout --quiet "$FABLECUT_COMMIT"
+          test "$(git -C /tmp/fablecut-native rev-parse HEAD)" = "$FABLECUT_COMMIT"
+          echo "Pinned FableCut: $(git -C /tmp/fablecut-native rev-parse HEAD)"
+          grep -Fq 'function drawFrame' /tmp/fablecut-native/app.js
+          grep -Fq 'await seekVideosTo(t' /tmp/fablecut-native/app.js
+          grep -Fq 'drawFrame(t)' /tmp/fablecut-native/app.js
+          python scripts/patch_fablecut_headless_export.py /tmp/fablecut-native/app.js
+
+      - name: Start native FableCut server
+        shell: bash
+        run: |
+          set -euo pipefail
+          export FABLECUT_DATA_DIR="$GITHUB_WORKSPACE/fablecut-data"
+          (
+            cd /tmp/fablecut-native
+            nohup env FABLECUT_DATA_DIR="$FABLECUT_DATA_DIR" PORT=7777 FABLECUT_NO_FS_WATCH=1 \
+              node server.js >"$GITHUB_WORKSPACE/output/fablecut-server.log" 2>&1 &
+            echo $! >"$GITHUB_WORKSPACE/output/fablecut-server.pid"
+          )
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:7777/api/export/ffmpeg -o /tmp/fablecut-ffmpeg.json \
+              && python -c "import json; assert json.load(open('/tmp/fablecut-ffmpeg.json'))['available'] is True"; then
+              echo "Native FableCut server is ready"
+              curl -fsS http://127.0.0.1:7777/api/project -o /tmp/fablecut-project-check.json
+              python - <<'PY'
+          import json
+          p=json.load(open('/tmp/fablecut-project-check.json'))
+          print('Server project:', p.get('name'), 'revision', p.get('revision'), 'variant', p.get('qserveVariant'))
+          PY
+              exit 0
+            fi
+            sleep 1
+          done
+          cat output/fablecut-server.log || true
+          exit 1
+
+      - name: Native FableCut compositor export
+        env:
+          FABLECUT_URL: http://127.0.0.1:7777
+          FABLECUT_EXPORT_TIMEOUT_MS: '1200000'
+        run: |
+          node scripts/run_fablecut_native_export.mjs \
+            fablecut-data \
+            "output/$OUTPUT_STEM.mp4" \
+            delivery
+
+      - name: Stop native FableCut server
+        if: always()
+        run: |
+          if [ -f output/fablecut-server.pid ]; then
+            kill "$(cat output/fablecut-server.pid)" 2>/dev/null || true
+          fi
+
+      - name: QA native output
+        run: |
+          EXPECTED="$(python - <<'PY'
+          import json
+          p=json.load(open('fablecut-data/project.json'))
+          disabled=set(p.get('disabledTracks') or [])
+          ends=[]
+          for c in p.get('clips') or []:
+              if c.get('track') in disabled: continue
+              try: ends.append(float(c.get('start') or 0)+float(c.get('duration') or 0))
+              except Exception: pass
+          print(max(ends) if ends else 0)
+          PY
+          )"
+          echo "Expected timeline duration: $EXPECTED"
+          python factory/qa_video.py "output/$OUTPUT_STEM.mp4" --expected-duration "$EXPECTED" --out-dir "output/qa"
+          ffprobe -v error -show_entries \
+            format=duration,size:stream=index,codec_type,codec_name,width,height,avg_frame_rate,sample_rate,channels \
+            -of json "output/$OUTPUT_STEM.mp4" >"output/$OUTPUT_STEM.ffprobe.json"
+
+      - name: Collect lead variant render context
+        if: always()
+        run: |
+          mkdir -p output
+          cp fablecut-data/project.json "output/$OUTPUT_STEM.fablecut-project.json" 2>/dev/null || true
+          printf '%s\n' "$FABLECUT_COMMIT" >"output/fablecut-upstream-commit.txt"
+          printf 'renderer=native-fablecut-fast-export\nprofile=delivery\nlead=%s\nvariant=%s\n' "$LEAD_NAME" "$VARIANT_SLUG" >"output/render-engine.txt"
+
+      - name: Upload native lead variant and QA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fablecut-variant-${{ env.OUTPUT_STEM }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
